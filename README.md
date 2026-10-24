@@ -26,18 +26,79 @@
 
 ## 安装
 
-    # 1) 从 npm 安装（发布包内已带 bin/workbuddy2api，无需自行编译）
+### 前置条件
+
+- DSH（DeepSeek Harness）桌面端，profile 目录一般是 `~/.dsh/profiles/desktop`。
+- 用来管理 profile 的 pnpm（DSH 自带运行时里也有）。
+- **不需要 Go 工具链**：网关二进制随包发布（`bin/workbuddy2api`）。
+
+### 第一步：装包
+
+npm 包发布后：
+
     cd ~/.dsh/profiles/desktop
     pnpm add dsh-workbuddy-panel
 
-    # 2) 或者从本地源码链接
+还没发布、或想用本地源码时，改用链接：
+
+    cd ~/.dsh/profiles/desktop
     pnpm add link:/path/to/dsh-workbuddy-panel
 
-然后在 `package.json` 的 `dsh.profile.bundles` 里追加 `"dsh-workbuddy-panel"`，重启 DSH。
+### 第二步：登记到 profile
 
-首次启动会在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成网关配置与数据目录。
+编辑 `~/.dsh/profiles/desktop/package.json`，把包名加进 `dsh.profile.bundles` 数组末尾：
 
-生成的配置是**面板的完整配置**（池策略、熔断/冷却、签到/保活/成长/旅行定时任务、会话粘性、指纹脱敏开关、prompt 透传等全部在内），只由插件覆盖四个字段：`api_key` / `listen` / `auth_dir` / `state_file`。若同机已存在一份面板配置（`~/Downloads/workbuddy2api-panel/config.json` 等），会以它为基底继承，保留你自己的池权重、隐藏模型与上游设置。
+    "dsh": {
+      "profile": {
+        "bundles": [
+          "@deepseek-ai/dsh-base",
+          "@deepseek-ai/dsh-web-app",
+          "...",
+          "dsh-workbuddy-panel"
+        ]
+      }
+    }
+
+### 第三步：重启 DSH
+
+**⌘Q 完全退出**再打开（关窗口不算）。插件在启动时加载，重启后设置左侧导航会出现 **WorkBuddy2API**，模型选择器里出现 `workbuddy2api` 分组。
+
+### 首次启动会发生什么
+
+1. 在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成网关配置与数据目录。
+2. 写出的配置是**面板的完整默认配置**（池策略、熔断/冷却、签到/保活/成长/旅行定时任务、会话粘性、指纹脱敏开关、prompt 透传），只由插件覆盖四个字段：`api_key` / `listen` / `auth_dir` / `state_file`。
+3. 若同机已有一份面板配置（例如 `~/Downloads/workbuddy2api-panel/config.json`），会**以它为基底继承**，你自己的池权重、隐藏模型、上游设置都会保留。
+4. 启动 `bin/workbuddy2api`，监听 `127.0.0.1:7863`。
+5. 设置页顶部变为「运行中 / 面板已连接」。
+
+### 第四步：添加账号
+
+设置 → **WorkBuddy2API** → **账号** → 表格底部 **+ 添加账号**：
+
+- **国内**：选「扫码登录」，弹窗会自动生成二维码，用手机扫码完成授权（也可以复制链接或点「打开登录页」）。
+- **国际**：选「国际」，按钮变成「打开登录页」，在浏览器里完成授权。
+- **令牌**：切到「令牌登录」，粘贴账号 JSON（面板 cockpit 导出格式，或 `auths/*.json` 的 `{ auth: { accessToken, refreshToken } }`）。
+
+账号落地后弹窗自动关闭，表格里出现新行。
+
+### 第五步：用模型
+
+在模型选择器里选 `workbuddy2api` 分组下的模型即可；网关新出现的模型会在下一次轮询自动加入（可在「模型」页关闭「自动加入新模型」）。
+
+### 迁移已有的面板安装
+
+- 账号目录：把 `authDir` 指到你已有的 `auths/`，或在网关工作目录里做一个软链（`ln -s /path/to/auths ~/.dsh/workbuddy2api-gateway/gateway/auths`）。
+- 如果那个面板进程还占着 `:7863`，插件会把它识别为 **external**：状态、目录、账号操作照常，只有「停止」会提示"不是本插件拉起的"。
+
+### 装不上时先看这里
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 设置里没有 WorkBuddy2API | 没有重启 DSH，或 bundles 里没加包名 | ⌘Q 重启；核对 package.json |
+| 网关「启动失败」 | 包内 `bin/workbuddy2api` 缺失（例如手工裁剪过目录） | 重新安装，或在仓库里 `git checkout bin/` |
+| 面板未连接 / 401 | 设置页里的密钥与网关 config.json 不一致 | 在「网关进程」分区重新保存一次密钥（插件会写回 config 并重启网关） |
+| 端口被占用 | 另一份网关已在运行 | 会显示为 external；要换端口就改 `port` 后再启动 |
+| 模型列表为空 | 网关没有可用账号 | 先在「账号」页添加账号 |
 
 ## 配置
 
