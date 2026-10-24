@@ -22,7 +22,6 @@
   "types": "lib/index.d.ts",
   "scripts": {
     "build": "tsdown",
-    "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "check": "pnpm run build && pnpm run typecheck && pnpm run test",
