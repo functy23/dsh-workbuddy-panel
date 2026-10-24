@@ -73,6 +73,13 @@
 - 设置左侧导航的图标由宿主的 `navIcon(id)` 白名单决定，插件没有 icon 位；本插件给那一行打 `data-wb2a-nav` 标记后用遮罩画出自己的图形。
 - 网关的登录、签到、限流策略属于网关本身，插件只驱动、不重写。
 
+## 鸣谢
+
+- **[workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel)**（[Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的 fork）— 本项目托管的网关本体。账号池轮转、熔断与冷却、会话粘性、签到 / 活跃 / 旅行 / 保活、OAuth 登录、OpenAI 兼容层全部来自它。MIT 许可，版权归 Sliverkiss 与 linguo2625469 所有。
+- 本仓库**不包含**上游任何源代码，也不重新分发其二进制：插件只负责发现、启动并监督用户本机已有的 workbuddy2api 可执行文件，通过它的 HTTP API 读写账号与模型。默认配置模板取自一份可用的面板安装（见 src/default-config.ts），字段结构归上游。
+- 上游仓库目前带有**停止维护声明**，并禁止未授权的反代 / 转卖；使用前请自行确认所在环境的条款。
+- UI 与交互参考了 dsh-workbuddy-connect-functy 的实现（账号行、添加账号弹窗、composer 额度徽章），视觉语言参考 DSH 内置的 Claude Style 主题。
+
 ## License
 
 MIT
