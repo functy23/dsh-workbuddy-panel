@@ -13,6 +13,7 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** The harness home directory ($DSH_HOME, else ~/.dsh). */
 export function dshHome(): string {
@@ -31,6 +32,18 @@ export function gatewayWorkdir(): string {
 }
 
 /** The gateway's config.json path. */
+/**
+ * The gateway executable shipped inside this package.
+ *
+ * A published build carries the binary in bin/ (the npm tarball ships ONLY that,
+ * never the source snapshot): a fresh install then works without asking the user
+ * to build a Go project first.
+ */
+export function bundledGatewayBinary(): string {
+  const exe = process.platform === 'win32' ? 'workbuddy2api.exe' : 'workbuddy2api'
+  return fileURLToPath(new URL('../bin/' + exe, import.meta.url))
+}
+
 export function gatewayConfigPath(): string {
   return join(gatewayWorkdir(), 'config.json')
 }

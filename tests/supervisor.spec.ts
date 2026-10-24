@@ -52,6 +52,13 @@ describe('supervisor', () => {
     expect(supervisor.resolveBinary()).toBe(exe)
   })
 
+  it('finds the executable shipped inside the package', () => {
+    const { supervisor } = makeSupervisor()
+    // No configured path and an empty workdir: the packaged bin/ is the answer,
+    // before any machine-wide guess.
+    expect(supervisor.resolveBinary()).toContain('bin/workbuddy2api')
+  })
+
   it('reports stopped when nothing listens and nothing was spawned', async () => {
     const { supervisor } = makeSupervisor()
     const status = await supervisor.refresh()

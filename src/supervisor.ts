@@ -34,6 +34,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { inheritGatewayConfig } from './default-config.ts'
+import { bundledGatewayBinary } from './paths.ts'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 
@@ -122,7 +123,7 @@ const MAX_BACKOFF_MS = 30_000
 const KILL_GRACE_MS = 5_000
 
 /** Candidate executables, most specific first. */
-function candidateBinaries(configured: string, workdir: string): readonly string[] {
+function candidateBinaries(configured: string, workdir: string, bundled: string): readonly string[] {
   const exe = process.platform === 'win32' ? 'workbuddy2api.exe' : 'workbuddy2api'
   const home = homedir()
   // An explicitly configured path is the whole answer: silently running a
@@ -135,6 +136,7 @@ function candidateBinaries(configured: string, workdir: string): readonly string
   return [
     process.env['WORKBUDDY2API_BIN'] ?? '',
     join(workdir, 'bin', exe),
+    bundled,
     join(home, 'Downloads', 'workbuddy2api-panel', exe),
     join(home, 'workbuddy2api-panel', exe),
     join(home, 'Desktop', 'workbuddy2api-panel', exe),
@@ -202,7 +204,7 @@ export class PanelSupervisor {
   /** The executable this plugin would run right now, or undefined. */
   resolveBinary(): string | undefined {
     if (this.resolvedBinary !== undefined) return this.resolvedBinary
-    for (const candidate of candidateBinaries(this.options.binary(), this.options.workdir())) {
+    for (const candidate of candidateBinaries(this.options.binary(), this.options.workdir(), bundledGatewayBinary())) {
       try {
         if (existsSync(candidate) && statSync(candidate).isFile()) {
           this.resolvedBinary = resolve(candidate)

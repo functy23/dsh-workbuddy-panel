@@ -917,7 +917,6 @@ declare const WORKBUDDY2API_GATEWAY_VERSION: string;
 declare function pluginDataDir(): string;
 /** The supervised gateway's working directory (its auths/ and data/ live here). */
 declare function gatewayWorkdir(): string;
-/** The gateway's config.json path. */
 declare function gatewayConfigPath(): string;
 //#endregion
 //#region src/index.d.ts

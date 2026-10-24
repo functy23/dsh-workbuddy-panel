@@ -25,8 +25,12 @@
     src/usage.ts        网关用量账本 → 按天聚合
     src/client/         UI；ui-rows.tsx / ui-styles.ts 是视觉基础
     tests/              服务端单测 + SSR 渲染测试 + primitives 测试替身
+    bin/workbuddy2api   随包发布的网关二进制（唯一进入 npm tarball 的产物）
+    upstream/           上游源码快照，只作对照阅读；发布包不含它
 
 ## 硬性约定
+
+0. **upstream/ 是只读快照**：不要在那里改网关逻辑；确需改动就重新编译并用新二进制覆盖 `bin/`，并在提交信息里写清来源。
 
 1. **不碰宿主**：不修改 DSH 的安装目录、不 patch 宿主 bundle。宿主没给的位（比如设置导航图标）用"打标记 + 自己的 CSS"实现。
 2. **不引运行时依赖**：QR 编码器是手写的（`qr-code.ts`），不要换成 npm 包；UI 原子来自宿主 seed 模块。
