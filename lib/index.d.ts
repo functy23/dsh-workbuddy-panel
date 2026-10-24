@@ -446,8 +446,6 @@ interface SupervisorStatus {
 }
 /** What the supervisor reads from the plugin. */
 interface SupervisorOptions {
-  /** The user's configured executable path; an empty string means "discover". */
-  binary(): string;
   /** The gateway's `config.json` path. */
   configPath(): string;
   /** The gateway's working directory. */
@@ -496,6 +494,14 @@ declare class PanelSupervisor {
   /** Append one line, dropping the oldest beyond the limit. */
   private note;
   /** The executable this plugin would run right now, or undefined. */
+  /**
+   * The executable this plugin runs: always the one shipped in bin/.
+   *
+   * No PATH walk, no ~/Downloads guess, no per-machine override. A gateway whose
+   * binary could come from anywhere makes the plugin behaviour depend on whatever
+   * else the machine happens to have installed; pinning it to the package means
+   * "install the plugin" and "run this build of the gateway" are the same claim.
+   */
   resolveBinary(): string | undefined;
   /** Forget the cached executable (a settings change, or a retry after "not found"). */
   invalidateBinary(): void;
@@ -938,7 +944,6 @@ declare const Config: z<Config>;
 interface Config {
   providerId: string;
   displayName: string;
-  binaryPath: string;
   port: number;
   autoStart: boolean;
   restartLimit: number;

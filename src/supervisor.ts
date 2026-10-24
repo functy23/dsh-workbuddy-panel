@@ -88,8 +88,6 @@ export interface SupervisorStatus {
 
 /** What the supervisor reads from the plugin. */
 export interface SupervisorOptions {
-  /** The user's configured executable path; an empty string means "discover". */
-  binary(): string
   /** The gateway's `config.json` path. */
   configPath(): string
   /** The gateway's working directory. */
@@ -121,30 +119,6 @@ const MAX_BACKOFF_MS = 30_000
 
 /** Grace before a stop escalates to SIGKILL. */
 const KILL_GRACE_MS = 5_000
-
-/** Candidate executables, most specific first. */
-function candidateBinaries(configured: string, workdir: string, bundled: string): readonly string[] {
-  const exe = process.platform === 'win32' ? 'workbuddy2api.exe' : 'workbuddy2api'
-  const home = homedir()
-  // An explicitly configured path is the whole answer: silently running a
-  // different executable than the one the user named would be worse than failing.
-  if (configured !== '') return [configured]
-  const fromPath = (process.env['PATH'] ?? '')
-    .split(delimiter)
-    .filter(entry => entry !== '')
-    .map(entry => join(entry, exe))
-  return [
-    process.env['WORKBUDDY2API_BIN'] ?? '',
-    join(workdir, 'bin', exe),
-    bundled,
-    join(home, 'Downloads', 'workbuddy2api-panel', exe),
-    join(home, 'workbuddy2api-panel', exe),
-    join(home, 'Desktop', 'workbuddy2api-panel', exe),
-    '/usr/local/bin/workbuddy2api',
-    '/opt/homebrew/bin/workbuddy2api',
-    ...fromPath,
-  ].filter(entry => entry !== '')
-}
 
 /** Read a JSON object without throwing. */
 function readJsonObject(path: string): Record<string, unknown> | undefined {
@@ -202,17 +176,24 @@ export class PanelSupervisor {
   }
 
   /** The executable this plugin would run right now, or undefined. */
+  /**
+   * The executable this plugin runs: always the one shipped in bin/.
+   *
+   * No PATH walk, no ~/Downloads guess, no per-machine override. A gateway whose
+   * binary could come from anywhere makes the plugin behaviour depend on whatever
+   * else the machine happens to have installed; pinning it to the package means
+   * "install the plugin" and "run this build of the gateway" are the same claim.
+   */
   resolveBinary(): string | undefined {
     if (this.resolvedBinary !== undefined) return this.resolvedBinary
-    for (const candidate of candidateBinaries(this.options.binary(), this.options.workdir(), bundledGatewayBinary())) {
-      try {
-        if (existsSync(candidate) && statSync(candidate).isFile()) {
-          this.resolvedBinary = resolve(candidate)
-          return this.resolvedBinary
-        }
-      } catch {
-        // An unreadable candidate is simply not the answer.
+    const bundled = bundledGatewayBinary()
+    try {
+      if (existsSync(bundled) && statSync(bundled).isFile()) {
+        this.resolvedBinary = resolve(bundled)
+        return this.resolvedBinary
       }
+    } catch {
+      // Unreadable is the same answer as missing.
     }
     return undefined
   }

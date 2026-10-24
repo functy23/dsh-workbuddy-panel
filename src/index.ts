@@ -92,7 +92,6 @@ export const Config: z<Config> = z.object({
   providerId: z.string().default(WORKBUDDY2API_PROVIDER),
   displayName: z.string().default('WorkBuddy2API'),
   /** The gateway executable; empty means "discover it". */
-  binaryPath: z.string().default(''),
   /** Loopback port the gateway listens on and the health probe uses. */
   port: z.natural().min(1).max(65535).default(7863),
   /** Start the gateway with the plugin (and restart it after a crash). */
@@ -113,7 +112,6 @@ export const Config: z<Config> = z.object({
 export interface Config {
   providerId: string
   displayName: string
-  binaryPath: string
   port: number
   autoStart: boolean
   restartLimit: number
@@ -181,7 +179,6 @@ export function apply(ctx: Context, config: Config): void {
   const overrides = new ModelOverridesStore()
 
   const supervisor = new PanelSupervisor({
-    binary: () => config.binaryPath,
     configPath: gatewayConfigPath,
     workdir: gatewayWorkdir,
     port: () => config.port,

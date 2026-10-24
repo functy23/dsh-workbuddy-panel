@@ -2,7 +2,7 @@
   "name": "dsh-workbuddy-panel",
   "displayName": "DSH WorkBuddy Panel",
   "description": "把 workbuddy2api 网关托管进 DSH：插件自己拉起并监督上游进程，账号、模型目录与思考档位全部在 DSH 内管理，不打开面板网页。",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Functy",
   "keywords": [
     "dsh-plugin",

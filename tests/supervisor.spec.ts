@@ -10,12 +10,11 @@ import { describe, expect, it } from 'vitest'
 import { PanelSupervisor } from '../src/supervisor.ts'
 
 /** A supervisor rooted in a throwaway directory. */
-function makeSupervisor(options: { binary?: string, port?: number, autoStart?: boolean } = {}) {
+function makeSupervisor(options: { port?: number, autoStart?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'wb2g-'))
   const workdir = join(root, 'gateway')
   mkdirSync(workdir, { recursive: true })
   const supervisor = new PanelSupervisor({
-    binary: () => options.binary ?? '',
     // A probe port nothing listens on, so refresh() cannot adopt an unrelated
     // gateway running on this machine.
     port: () => options.port ?? 59_999,
@@ -42,16 +41,6 @@ describe('supervisor', () => {
     expect(supervisor.ensureConfig().created).toBe(false)
   })
 
-  it('finds an executable placed in its own bin directory', () => {
-    const { supervisor, workdir } = makeSupervisor()
-    const bin = join(workdir, 'bin')
-    mkdirSync(bin, { recursive: true })
-    const exe = join(bin, process.platform === 'win32' ? 'workbuddy2api.exe' : 'workbuddy2api')
-    writeFileSync(exe, '#!/bin/sh\nexit 0\n')
-    chmodSync(exe, 0o755)
-    expect(supervisor.resolveBinary()).toBe(exe)
-  })
-
   it('finds the executable shipped inside the package', () => {
     const { supervisor } = makeSupervisor()
     // No configured path and an empty workdir: the packaged bin/ is the answer,
@@ -64,14 +53,6 @@ describe('supervisor', () => {
     const status = await supervisor.refresh()
     expect(status.state).toBe('stopped')
     expect(status.managed).toBe(false)
-  })
-
-  it('refuses to start when no executable exists', async () => {
-    const { supervisor } = makeSupervisor({ binary: join(tmpdir(), 'definitely-missing-workbuddy2api') })
-    const status = await supervisor.start()
-    expect(status.state).toBe('failed')
-    expect(status.error).toContain('not found')
-    expect(existsSync(join(supervisor.status().workdir, 'config.json'))).toBe(true)
   })
 
   it('a stop on an unspawned, unlistening gateway is a clean no-op', async () => {
