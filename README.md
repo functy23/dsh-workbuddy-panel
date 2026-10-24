@@ -26,9 +26,12 @@
 
 ## 安装
 
+    # 1) 从 npm 安装（发布包内已带 bin/workbuddy2api，无需自行编译）
     cd ~/.dsh/profiles/desktop
+    pnpm add dsh-workbuddy-panel
+
+    # 2) 或者从本地源码链接
     pnpm add link:/path/to/dsh-workbuddy-panel
-    # 或者从 npm / tarball 安装：发布包内已带 bin/workbuddy2api，无需自行编译
 
 然后在 `package.json` 的 `dsh.profile.bundles` 里追加 `"dsh-workbuddy-panel"`，重启 DSH。
 
@@ -82,7 +85,7 @@
 - **[workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel)**（[Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的 fork）— 本项目托管的网关本体。账号池轮转、熔断与冷却、会话粘性、签到 / 活跃 / 旅行 / 保活、OAuth 登录、OpenAI 兼容层全部来自它。MIT 许可，版权归 Sliverkiss 与 linguo2625469 所有。
 - 本仓库在 upstream/workbuddy2api-panel/ 保存的是**本机工作树的源码快照**：它就是 `bin/workbuddy2api` 的编译来源，包含本地对上游的全部修改（复制时有 47 个文件与上游最后一次提交不同），因此"插件跑的那份二进制"和"仓库里那棵源码树"是对得上的，可以直接核对插件调用的 HTTP 契约。Git 历史未包含，见 `upstream/workbuddy2api-panel/BUILD-NOTES.md`。npm 发布包**只带二进制** `bin/workbuddy2api`，不含源码；插件本身不链接上游代码，只通过 HTTP API 读写账号与模型。默认配置模板取自该安装的 `config.json`（见 `src/default-config.ts`），字段结构归上游。
 - 上游仓库目前带有**停止维护声明**，并禁止未授权的反代 / 转卖；使用前请自行确认所在环境的条款。
-- UI 与交互参考了 dsh-workbuddy-connect-functy 的实现（账号行、添加账号弹窗、composer 额度徽章），视觉语言参考 DSH 内置的 Claude Style 主题。
+- UI 与交互参考了插件 [dsh-workbuddy-connect-functy](https://github.com/functy23) 的实现（账号行、添加账号弹窗、composer 额度徽章）；视觉语言参考插件 **dsh-claude-style**（Claude Style 主题插件）的设计。
 
 ## License
 
