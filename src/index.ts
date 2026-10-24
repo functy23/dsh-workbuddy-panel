@@ -39,6 +39,39 @@ import { WorkBuddy2ApiService } from './service.ts'
 import { registerGatewayRoutes } from './routes.ts'
 import { WORKBUDDY2API_GATEWAY_VERSION } from './version.ts'
 import { gatewayConfigPath, gatewayWorkdir, pluginDataDir } from './paths.ts'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+/**
+ * Find an existing gateway document to inherit from.
+ *
+ * A user who already runs a panel has real settings in it — pool weights, hidden
+ * models, an upstream fingerprint. Pointing this plugin at that machine must not
+ * throw them away, so the first readable candidate becomes the base of the
+ * generated document (the four owned fields are still overwritten).
+ */
+function discoverGatewayConfig(ownPath: string): Record<string, unknown> | undefined {
+  const home = homedir()
+  const candidates = [
+    join(home, 'Downloads', 'workbuddy2api-panel', 'config.json'),
+    join(home, 'workbuddy2api-panel', 'config.json'),
+    join(home, 'Desktop', 'workbuddy2api-panel', 'config.json'),
+  ]
+  for (const candidate of candidates) {
+    if (candidate === ownPath) continue
+    // Read plainly: the panel's document carries no plugin-store version stamp.
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(candidate, 'utf8'))
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // Missing or malformed: fall through to the next candidate.
+    }
+  }
+  return undefined
+}
 
 /** Stable Cordis plugin name. */
 export const name = 'llm-workbuddy2api-gateway'
@@ -153,6 +186,7 @@ export function apply(ctx: Context, config: Config): void {
     workdir: gatewayWorkdir,
     port: () => config.port,
     authDir: () => config.authDir,
+    baseConfig: () => discoverGatewayConfig(gatewayConfigPath()),
     autoStart: () => config.autoStart,
     restartLimit: () => config.restartLimit,
     log: (message, error) => {

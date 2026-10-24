@@ -27,7 +27,9 @@
 
 然后在 `package.json` 的 `dsh.profile.bundles` 里追加 `"dsh-workbuddy-panel"`，重启 DSH。
 
-首次启动会在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成网关配置与数据目录；已有账号目录可以通过 `authDir` 指过去。
+首次启动会在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成网关配置与数据目录。
+
+生成的配置是**面板的完整配置**（池策略、熔断/冷却、签到/保活/成长/旅行定时任务、会话粘性、指纹脱敏开关、prompt 透传等全部在内），只由插件覆盖四个字段：`api_key` / `listen` / `auth_dir` / `state_file`。若同机已存在一份面板配置（`~/Downloads/workbuddy2api-panel/config.json` 等），会以它为基底继承，保留你自己的池权重、隐藏模型与上游设置。
 
 ## 配置
 

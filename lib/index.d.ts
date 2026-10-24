@@ -454,6 +454,8 @@ interface SupervisorOptions {
   workdir(): string;
   /** Where the gateway keeps its accounts; empty means the workdir default. */
   authDir?(): string;
+  /** A gateway document to inherit from (an existing install), when there is one. */
+  baseConfig?(): Record<string, unknown> | undefined;
   /** The loopback port to probe. */
   port(): number;
   /** Whether a crash restarts the child. */

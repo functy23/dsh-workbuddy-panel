@@ -33,6 +33,7 @@ import type { ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
+import { inheritGatewayConfig } from './default-config.ts'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 
@@ -94,6 +95,8 @@ export interface SupervisorOptions {
   workdir(): string
   /** Where the gateway keeps its accounts; empty means the workdir default. */
   authDir?(): string
+  /** A gateway document to inherit from (an existing install), when there is one. */
+  baseConfig?(): Record<string, unknown> | undefined
 
   /** The loopback port to probe. */
   port(): number
@@ -233,13 +236,14 @@ export class PanelSupervisor {
     mkdirSync(this.options.workdir(), { recursive: true })
     const apiKey = 'wb2a-' + randomBytes(18).toString('hex')
     const authDir = this.options.authDir?.() ?? ''
-    const document = {
-      api_key: apiKey,
-      listen: ':' + String(this.options.port()),
-      auth_dir: authDir === '' ? './auths' : authDir,
-      state_file: './data/state.json',
-      logging: { request_archive_enabled: false, request_client_info: false },
-    }
+    // The full panel document, not a minimal one: a five-field config starts the
+    // process but silently drops the pool policy and every scheduled task. An
+    // existing install's document is merged underneath when one is found.
+    const document = inheritGatewayConfig(this.options.baseConfig?.(), {
+      apiKey,
+      port: this.options.port(),
+      authDir,
+    })
     mkdirSync(join(this.options.workdir(), 'data'), { recursive: true })
     writeFileSync(path, JSON.stringify(document, null, 2) + '\n', 'utf8')
     this.note('plugin', 'generated ' + path + ' with a fresh api key')
