@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="dsh-workbuddy-panel">
+  <defs>
+    <linearGradient id="node" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#6f9bf5"/>
+      <stop offset="1" stop-color="#3f6fd0"/>
+    </linearGradient>
+  </defs>
+  <rect x="26" y="26" width="460" height="460" rx="118" fill="none" stroke="#9a9992" stroke-opacity="0.75" stroke-width="14"/>
+  <g fill="none" stroke="#5b8aec" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 236v40"/>
+    <path d="M256 276c0 46-42 66-78 88"/>
+    <path d="M256 276c0 46 42 66 78 88"/>
+  </g>
+  <circle cx="256" cy="176" r="84" fill="url(#node)"/>
+  <circle cx="142" cy="392" r="70" fill="#9ec0f8"/>
+  <circle cx="370" cy="392" r="70" fill="#9ec0f8"/>
+</svg>
