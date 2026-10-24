@@ -1,0 +1,5 @@
+# Registers the workbuddy2api-gateway route: the plugin supervises its own
+# workbuddy2api process and serves that process's /v1 through pi-ai.
+- insert:
+    - id: llm-workbuddy2api-gateway
+      name: dsh-workbuddy-panel
