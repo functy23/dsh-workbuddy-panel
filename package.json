@@ -25,7 +25,8 @@
     "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
-    "check": "pnpm run build && pnpm run typecheck && pnpm run test"
+    "check": "pnpm run build && pnpm run typecheck && pnpm run test",
+    "release:npm": "npm publish --access public"
   },
   "exports": {
     ".": {
