@@ -17,7 +17,7 @@ import type { PanelStore } from './store.ts'
 import type { Translate } from './copy.ts'
 import type { StatusDocument } from './status-document.ts'
 import type { WebAccount, WebModel } from '../service.ts'
-import type { SupervisorState } from '../supervisor.ts'
+import type { GatewayState } from '../gateway-contract.ts'
 import { Badge, Ring, SettingRow, StatTile, StatusDot } from './ui-rows.tsx'
 import { ActionButton } from './ui-button.tsx'
 
@@ -32,20 +32,34 @@ export interface PanelInjected {
 }
 
 /** The gateway's state as words. */
-export function gatewayStateText(state: SupervisorState, t: Translate): string {
+export function gatewayStateText(state: GatewayState, t: Translate): string {
   if (state === 'running') return t('gatewayStateRunning')
   if (state === 'starting') return t('gatewayStateStarting')
   if (state === 'external') return t('gatewayStateExternal')
   if (state === 'failed') return t('gatewayStateFailed')
+  if (state === 'server-missing') return t('gatewayStateServerMissing')
+  if (state === 'server-invalid') return t('gatewayStateServerInvalid')
+  if (state === 'host-unavailable') return t('gatewayStateHostUnavailable')
+  if (state === 'port-conflict') return t('gatewayStatePortConflict')
   return t('gatewayStateStopped')
 }
 
 /** The gateway's state as a tone. */
-export function gatewayTone(state: SupervisorState): 'ok' | 'warn' | 'error' | 'off' {
+export function gatewayTone(state: GatewayState): 'ok' | 'warn' | 'error' | 'off' {
   if (state === 'running') return 'ok'
-  if (state === 'starting' || state === 'external') return 'warn'
-  if (state === 'failed') return 'error'
+  if (state === 'starting' || state === 'external' || state === 'server-missing' || state === 'server-invalid') return 'warn'
+  if (state === 'failed' || state === 'host-unavailable' || state === 'port-conflict') return 'error'
   return 'off'
+}
+
+/** Whether the gateway is down for a reason the page should name. */
+function gatewayIsDown(state: GatewayState): boolean {
+  return state === 'stopped'
+    || state === 'failed'
+    || state === 'server-missing'
+    || state === 'server-invalid'
+    || state === 'host-unavailable'
+    || state === 'port-conflict'
 }
 
 /** Share of the pool that can serve a request right now. */
@@ -105,7 +119,7 @@ export function WorkBuddy2ApiFooterEntry(props: PanelInjected): ReactElement | n
   const tone = gatewayTone(state)
   const label = t('panelCardTitle')
   const percent = ringPercent(document)
-  const warn = state === 'failed' || document.counts.cooling > 0
+  const warn = gatewayTone(state) === 'error' || document.counts.cooling > 0
 
   if (props.wide === false) {
     return (
@@ -139,7 +153,7 @@ export function WorkBuddy2ApiFooterEntry(props: PanelInjected): ReactElement | n
         <span className="wb2-footHead">
           <span className="wb2-footLabel">{t('panelAccountsTitle')}</span>
           <span className="wb2-footAmount">
-            {state === 'stopped' || state === 'failed'
+            {gatewayIsDown(state)
               ? t('panelGatewayDown')
               : t('panelCardAccounts', document.counts.healthy, document.counts.total)}
           </span>
@@ -250,6 +264,7 @@ export function WorkBuddy2ApiPanel(props: PanelInjected): ReactElement {
           </span>
           <span className="wb2-spacer" />
           {gateway === undefined || gateway.state === 'running' || gateway.state === 'external'
+            || document?.server.installed !== true || gateway.state === 'host-unavailable'
             ? null
             : (
               <ActionButton
@@ -261,7 +276,7 @@ export function WorkBuddy2ApiPanel(props: PanelInjected): ReactElement {
             )}
           <ActionButton
             label={t('gatewayRestart')}
-            disabled={busy}
+            disabled={busy || document?.server.installed !== true}
             onClick={() => { void store.act({ action: 'gateway-restart' }, 'gateway-restart') }}
           />
           <ActionButton label={t('panelRefresh')} disabled={busy} onClick={() => { void store.act({ action: 'refresh' }) }} />
@@ -287,7 +302,7 @@ export function WorkBuddy2ApiPanel(props: PanelInjected): ReactElement {
                   <Badge tone={tone === 'ok' ? 'ok' : tone === 'error' ? 'error' : tone === 'warn' ? 'warn' : 'muted'}>
                     {gatewayStateText(document.gateway.state, t)}
                   </Badge>
-                  {document.gateway.pid === undefined ? null : <Badge tone="muted">{t('gatewayPid', document.gateway.pid)}</Badge>}
+                  {document.gateway.serverVersion === undefined ? null : <Badge tone="muted">{t('gatewayServerVersion', document.gateway.serverVersion)}</Badge>}
                 </>
               )}
               description={(

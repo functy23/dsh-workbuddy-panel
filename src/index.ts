@@ -1,12 +1,12 @@
 /**
  * WorkBuddy2API Gateway for DeepSeek Harness.
  *
- * The gateway is not an external service this plugin talks to — it is a process
- * this plugin owns. One mount does five things:
+ * This is the panel half. The gateway process belongs to the host gateway row;
+ * this row only reads it and serves the model route. One mount does five things:
  *
- * 1. **Supervises** the workbuddy2api executable: finds it, generates its config
- *    inside the plugin's data directory, starts it, restarts it after a crash,
- *    and shows its log on the settings page ({@link PanelSupervisor}).
+ * 1. **Reads the host row.** The process, its config, and its server cache belong
+ *    to `workbuddy2api-gateway-host`; this row only reads `GatewayHost.status()`
+ *    and never imports `node:child_process`.
  * 2. **Serves the route.** A pi-ai provider points at the gateway's own
  *    OpenAI-compatible /v1, with the durable-attachment hooks wired so image
  *    input works ({@link createWorkBuddy2ApiAdapter}).
@@ -18,7 +18,7 @@
  *    gateway's web panel is never needed, and never opened.
  * 5. **Stays out of the way.** A gateway somebody else started is adopted as an
  *    external instance: health, catalog, and management all work, and only
- *    "stop" declines, because killing a process this plugin did not spawn is a
+ *    "stop" declines, because killing a process the host row did not spawn is a
  *    surprise rather than a feature.
  *
  * @module dsh-workbuddy2api-gateway
@@ -35,45 +35,13 @@ import { ConnectionStore, DEFAULT_CONNECTION } from './settings-store.ts'
 import { PanelClient } from './panel-client.ts'
 import { createWorkBuddy2ApiAdapter, WORKBUDDY2API_PROVIDER } from './adapter.ts'
 import type { WorkBuddy2ApiAdapter } from './adapter.ts'
-import { PanelSupervisor } from './supervisor.ts'
+import { GATEWAY_HOST_SERVICE } from './gateway-contract.ts'
+import type { GatewayHost } from './gateway-contract.ts'
 import { WorkBuddy2ApiService } from './service.ts'
 import { registerGatewayRoutes } from './routes.ts'
 import { WORKBUDDY2API_GATEWAY_VERSION } from './version.ts'
 import { piAiVersionSummary, piAiVersionWarning, resolvedPiAiVersion } from './pi-ai-version.ts'
-import { gatewayConfigPath, gatewayWorkdir, pluginDataDir } from './paths.ts'
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-
-/**
- * Find an existing gateway document to inherit from.
- *
- * A user who already runs a panel has real settings in it — pool weights, hidden
- * models, an upstream fingerprint. Pointing this plugin at that machine must not
- * throw them away, so the first readable candidate becomes the base of the
- * generated document (the four owned fields are still overwritten).
- */
-function discoverGatewayConfig(ownPath: string): Record<string, unknown> | undefined {
-  const home = homedir()
-  const candidates = [
-    join(home, 'Downloads', 'workbuddy2api-panel', 'config.json'),
-    join(home, 'workbuddy2api-panel', 'config.json'),
-    join(home, 'Desktop', 'workbuddy2api-panel', 'config.json'),
-  ]
-  for (const candidate of candidates) {
-    if (candidate === ownPath) continue
-    // Read plainly: the panel's document carries no plugin-store version stamp.
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(candidate, 'utf8'))
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>
-      }
-    } catch {
-      // Missing or malformed: fall through to the next candidate.
-    }
-  }
-  return undefined
-}
+import { pluginDataDir } from './paths.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'llm-workbuddy2api-gateway'
@@ -82,29 +50,27 @@ export const name = 'llm-workbuddy2api-gateway'
 export const inject = ['llm']
 
 /**
- * Composition defaults.
+ * Composition defaults for the panel row.
  *
- * Everything here is a *default*: the settings page writes its own document for
- * the fields a user changes at runtime (address, key, cadence), and the process
- * fields below are what an install starts from. They are deliberately not marked
- * volatile — the page writes its own store, so a save cannot depend on the host's
- * settings write seam being present.
+ * Process fields live in the host row (`workbuddy2api-gateway-host`) now. The
+ * four deprecated fields stay accepted so an existing profile patch does not
+ * fail schema validation; only `port` is still read, as the default loopback
+ * address before the host service answers.
  */
 export const Config: z<Config> = z.object({
   providerId: z.string().default(WORKBUDDY2API_PROVIDER),
   displayName: z.string().default('WorkBuddy2API'),
-  /** The gateway executable; empty means "discover it". */
-  /** Loopback port the gateway listens on and the health probe uses. */
+  /** Deprecated: the host row owns the port. Read only as the panel URL default. */
   port: z.natural().min(1).max(65535).default(7863),
-  /** Start the gateway with the plugin (and restart it after a crash). */
+  /** Deprecated: the host row owns auto-start. */
   autoStart: z.boolean().default(true),
-  /** Restarts allowed in one run before supervision gives up. */
+  /** Deprecated: the host row owns the restart limit. */
   restartLimit: z.natural().default(5),
   /** Poll interval for the catalog, in seconds. */
   refreshSeconds: z.natural().min(10).max(600).default(15),
   /** Panel API key; empty means "use (or generate) the gateway config's key". */
   apiKey: z.string().default(''),
-  /** Accounts directory; empty means '<workdir>/auths'. */
+  /** Deprecated: the host row owns the accounts directory. */
   authDir: z.string().default(''),
   /** Whether a model the gateway announces joins the picker without asking. */
   autoRegister: z.boolean().default(true),
@@ -123,7 +89,7 @@ export interface Config {
   autoRegister: boolean
 }
 
-/** Poll floor for the supervisor scheduler. */
+/** Poll floor for the catalog scheduler. */
 const TICK_MS = 5_000
 
 /** The route id this instance actually registered under. */
@@ -180,28 +146,22 @@ export function apply(ctx: Context, config: Config): void {
   })
   const overrides = new ModelOverridesStore()
 
-  const supervisor = new PanelSupervisor({
-    configPath: gatewayConfigPath,
-    workdir: gatewayWorkdir,
-    port: () => config.port,
-    authDir: () => config.authDir,
-    baseConfig: () => discoverGatewayConfig(gatewayConfigPath()),
-    autoStart: () => config.autoStart,
-    restartLimit: () => config.restartLimit,
-    log: (message, error) => {
-      if (error === undefined) log.info(message)
-      else log.warn(message, error)
-    },
-  })
+  // The host composition row owns the process and the server cache. The panel
+  // resolves it lazily: the row may load before or after this one, and a row
+  // reload must not leave the panel holding a dead reference.
+  const host = (): GatewayHost | undefined =>
+    ctx.get(GATEWAY_HOST_SERVICE) as unknown as GatewayHost | undefined
 
-  // The route's key: the user's, else the one this plugin generated into the
-  // gateway's config on first start. Reading it lazily is what lets a key appear
-  // after the supervisor wrote the file.
+  // The route's key: the user's, else the one the host row generated into the
+  // gateway's config. Reading it lazily is what lets a key appear after the
+  // host wrote the file.
   const client = new PanelClient(() => {
     const settings = connection.current()
+    const port = host()?.status().port ?? config.port
+    const defaultUrl = 'http://127.0.0.1:' + String(port)
     return {
-      baseUrl: settings.panelUrl,
-      apiKey: settings.apiKey !== '' ? settings.apiKey : supervisor.apiKeyFromConfig() ?? '',
+      baseUrl: settings.panelUrl === DEFAULT_CONNECTION.panelUrl ? defaultUrl : settings.panelUrl,
+      apiKey: settings.apiKey !== '' ? settings.apiKey : host()?.apiKeyFromConfig() ?? '',
     }
   })
 
@@ -237,7 +197,7 @@ export function apply(ctx: Context, config: Config): void {
     connection,
     overrides,
     client,
-    supervisor,
+    host,
     warn: (message, error) => {
       log.warn(message, error)
     },
@@ -255,30 +215,15 @@ export function apply(ctx: Context, config: Config): void {
     },
   })
 
-  // Bring the gateway up with the plugin, then read it once. The start is
-  // deliberately not awaited by apply(): a slow or missing executable must not
-  // hold the host's plugin loader, and the page renders "starting" in the
-  // meantime.
-  void (async () => {
-    if (config.autoStart) {
-      const started = await supervisor.start()
-      if (started.state === 'failed') log.warn('workbuddy2api-gateway: gateway did not start: ' + String(started.error ?? 'unknown'))
-    }
-    await service.refresh().catch((error: unknown) => {
-      log.warn('workbuddy2api-gateway: first gateway read failed', error)
-    })
-  })()
+  // The host row starts the process; the panel only reads the catalog once.
+  void service.refresh().catch((error: unknown) => {
+    log.warn('workbuddy2api-gateway: first gateway read failed', error)
+  })
 
   // One ticker instead of one timer per interval: the cadence is a setting the
   // page can change, so the schedule is recomputed on each tick rather than
   // frozen at start.
   let lastRead = Date.now()
-  // Process liveness is its own cadence now: the status route no longer pays a
-  // health probe per request, and a starting gateway cannot delay a page.
-  const probe = setInterval(() => {
-    void supervisor.refresh()
-  }, TICK_MS)
-  probe.unref?.()
   const ticker = setInterval(() => {
     const settings = connection.current()
     if (Date.now() - lastRead < settings.refreshSeconds * 1000) return
@@ -290,11 +235,9 @@ export function apply(ctx: Context, config: Config): void {
   }, TICK_MS)
   ticker.unref?.()
   ctx.effect(() => () => {
-    clearInterval(probe)
     clearInterval(ticker)
     service.dispose()
-    supervisor.dispose()
-  }, 'dsh-workbuddy2api-gateway: poller and process')
+  }, 'dsh-workbuddy2api-gateway: poller')
 
   ctx.inject(['llm'], llmCtx => {
     const llm = llmCtx.llm
@@ -319,7 +262,7 @@ export function apply(ctx: Context, config: Config): void {
       v1BaseUrl: () => client.v1BaseUrl(),
       apiKey: () => {
         const settings = connection.current()
-        return settings.apiKey !== '' ? settings.apiKey : supervisor.apiKeyFromConfig() ?? ''
+        return settings.apiKey !== '' ? settings.apiKey : host()?.apiKeyFromConfig() ?? ''
       },
       hidden: () => service.catalogModels().filter(model => !model.enabled).map(model => model.id),
       // Image input rides the host's durable attachment store; without these two
@@ -356,9 +299,9 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 export { WorkBuddy2ApiService } from './service.ts'
-export type { WebStatus, WebAccount, WebModel, WebSync, ActionOutcome } from './service.ts'
-export { PanelSupervisor } from './supervisor.ts'
-export type { SupervisorStatus, SupervisorState, SupervisorLogLine } from './supervisor.ts'
+export type { WebStatus, WebAccount, WebModel, WebSync, WebLogin, WebLoginDone, ActionOutcome } from './service.ts'
+export { GATEWAY_HOST_SERVICE, GATEWAY_HOST_SERVICE_VERSION } from './gateway-contract.ts'
+export type { GatewayHost, GatewayLogLine, GatewayState, GatewayStatus, ServerDownloadState, ServerDownloadStatus, ServerStatus } from './gateway-contract.ts'
 export { buildCatalog, hiddenIds, visibleIds, panelHiddenList, THINKING_LEVELS, isThinkingLevel } from './catalog.ts'
 export type { CatalogModel, ModelOverride, ThinkingLevel } from './catalog.ts'
 export { ModelOverridesStore } from './overrides-store.ts'
@@ -370,4 +313,4 @@ export { createWorkBuddy2ApiAdapter, WORKBUDDY2API_PROVIDER } from './adapter.ts
 export { STATUS_PATH, ACTION_PATH, parseAction, runAction } from './routes.ts'
 export type { GatewayAction } from './routes.ts'
 export { WORKBUDDY2API_GATEWAY_VERSION } from './version.ts'
-export { gatewayConfigPath, gatewayWorkdir, pluginDataDir } from './paths.ts'
+export { gatewayConfigPath, gatewayWorkdir, pluginDataDir, serverRootDir } from './paths.ts'

@@ -1,5 +1,13 @@
-# Registers the workbuddy2api-gateway route: the plugin supervises its own
-# workbuddy2api process and serves that process's /v1 through pi-ai.
+# Two rows, one package:
+#
+# 1. the host row owns the downloaded server, its config, and the managed
+#    subprocess through ctx.subprocess;
+# 2. the panel row serves the pi-ai route, the catalog, and the settings UI.
+#
+# The panel never spawns a process. Keeping the rows separate is what lets a
+# panel reload leave the gateway running.
 - insert:
+    - id: workbuddy2api-gateway-host
+      name: dsh-workbuddy-panel/gateway
     - id: llm-workbuddy2api-gateway
       name: dsh-workbuddy-panel

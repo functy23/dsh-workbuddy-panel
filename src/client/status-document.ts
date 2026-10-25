@@ -39,6 +39,9 @@ export type ClientAction =
   | { action: 'gateway-start' }
   | { action: 'gateway-stop' }
   | { action: 'gateway-restart' }
+  | { action: 'server-download' }
+  | { action: 'server-cancel' }
+  | { action: 'server-verify' }
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null }
@@ -74,6 +77,7 @@ export function validStatus(value: unknown): value is StatusDocument {
     && typeof document['connection'] === 'object'
     && typeof document['counts'] === 'object'
     && typeof document['gateway'] === 'object'
+    && typeof document['server'] === 'object'
 }
 
 /** Read the status document. Never throws. */

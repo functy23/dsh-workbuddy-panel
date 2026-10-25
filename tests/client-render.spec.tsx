@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { WorkBuddy2ApiSettingsPage } from '../src/client/SettingsPage.tsx'
 import { WorkBuddy2ApiFooterEntry, WorkBuddy2ApiPanel } from '../src/client/panel-view.tsx'
+import { WorkBuddy2ApiCreditBadge } from '../src/client/credit-badge.tsx'
+import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { COPY, makeTranslator } from '../src/client/copy.ts'
 import type { StoreSnapshot } from '../src/client/store.ts'
 import type { StatusDocument } from '../src/client/status-document.ts'
@@ -23,13 +25,21 @@ const document = {
   controlKey: 'k',
   version: '0.1.0',
   piAiVersion: '1.1.0',
-  provider: { id: 'workbuddy2api', owned: true },
+  provider: { id: 'workbuddy2api', owned: true, global: { id: 'workbuddy2api-global', owned: true } },
   connection: { panelUrl: 'http://127.0.0.1:7863', hasApiKey: true, refreshSeconds: 15, syncHiddenToPanel: true, autoRegister: true },
   gateway: {
-    state: 'running', managed: true, pid: 4242, binary: '/opt/workbuddy2api/workbuddy2api',
+    state: 'running', managed: true, host: 'dsh-subprocess', serverVersion: '1.13.0-panel',
+    binary: '/opt/workbuddy2api/workbuddy2api',
     configPath: '/tmp/workbuddy2api-gateway/config.json', workdir: '/tmp/workbuddy2api-gateway', port: 7863,
     since: '2026-10-24T08:00:00.000Z', restarts: 1, autoStart: true,
     log: [{ at: '2026-10-24T08:00:01.000Z', stream: 'stdout', text: 'workbuddy2api listening on :7863' }],
+  },
+  server: {
+    platform: 'darwin', arch: 'arm64', supported: true, version: '1.13.0-panel', apiVersion: 1,
+    installed: true, binaryPath: '/Users/test/.dsh/workbuddy2api-gateway/server/1.13.0-panel/darwin-arm64/workbuddy2api',
+    sha256: 'd48a6c46877a340c824f18c4ee5ce77c349b6b0679405c040f48c902005cc87b',
+    size: 14_276_994, downloadSize: 7_721_207, releaseUrl: 'https://example.test/server.gz',
+    download: { state: 'idle', received: 7_721_207, total: 7_721_207 },
   },
   panel: { connected: true, version: '1.13.0-panel', uptimeSec: 3600, authRequired: true },
   sync: { lastSyncedAt: '2026-10-24T09:00:00.000Z', added: ['cn:glm-5v-turbo'], removed: [], changed: [], autoRegister: true },
@@ -42,7 +52,7 @@ const document = {
       rateLimitedModels: 0, enterprise: false,
     },
     {
-      uid: 'u2', nickname: '刘吉鹏', realm: 'global', status: 'cooling', hasRefreshToken: false,
+      uid: 'u2', nickname: '刘吉鹏', realm: 'global', credits: 5, status: 'cooling', hasRefreshToken: false,
       checkinDone: false, successCount: 0, failStreak: 3, rateLimitedModels: 1, enterprise: true,
     },
   ],
@@ -113,6 +123,15 @@ describe('settings page render', () => {
     expect(html).not.toContain('gatewayStateRunning')
   })
 
+  it('renders the separately downloaded server card on the gateway tab', () => {
+    const html = renderToStaticMarkup(<WorkBuddy2ApiSettingsPage t={zh} store={store} initialTab="gateway" />)
+    expect(html).toContain('服务端')
+    expect(html).toContain('已安装')
+    expect(html).toContain('SHA-256')
+    expect(html).toContain('由 DSH 宿主托管')
+    expect(html).not.toMatch(/\{\d\}/)
+  })
+
   it('offers a realm tab and starts on the domestic models', () => {
     const html = renderToStaticMarkup(<WorkBuddy2ApiSettingsPage t={zh} store={store} initialTab="models" />)
     expect(html).toContain('国内版')
@@ -135,6 +154,42 @@ describe('settings page render', () => {
       <WorkBuddy2ApiSettingsPage t={zh} store={fakeStore({ loading: true, error: 'status document unavailable' })} />,
     )
     expect(html).toContain('失败：')
+  })
+})
+
+/** A model-directory store with one selected provider. */
+function fakeDirectory(provider: string): ModelDirectory['store'] {
+  return {
+    subscribe: () => () => {},
+    getSnapshot: () => ({ current: { provider, model: 'x' } }),
+  } as unknown as ModelDirectory['store']
+}
+
+describe('credit badge', () => {
+  const store = fakeStore({ document, loading: false })
+
+  it('shows the domestic pool when the domestic route is selected', () => {
+    const html = renderToStaticMarkup(
+      <WorkBuddy2ApiCreditBadge t={zh} store={store} directory={fakeDirectory('workbuddy2api')} />,
+    )
+    expect(html).toContain('CN 剩余积分')
+    expect(html).toContain('2,099')
+  })
+
+  it('shows the global pool when the global route is selected', () => {
+    const html = renderToStaticMarkup(
+      <WorkBuddy2ApiCreditBadge t={zh} store={store} directory={fakeDirectory('workbuddy2api-global')} />,
+    )
+    expect(html).toContain('Global 剩余积分')
+    expect(html).toContain('5')
+    expect(html).not.toContain('2,099')
+  })
+
+  it('renders nothing for another provider', () => {
+    const html = renderToStaticMarkup(
+      <WorkBuddy2ApiCreditBadge t={zh} store={store} directory={fakeDirectory('deepseek')} />,
+    )
+    expect(html).toBe('')
   })
 })
 

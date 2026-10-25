@@ -1,23 +1,26 @@
 /**
- * The composer's credit badge: what the pool has left, in the row DSH already
- * fills with what a turn costs.
+ * The composer's credit badge: the quota behind the model about to answer.
  *
- * This is the seat the sidebar card used to occupy, moved to where the number is
- * actually spent from. It states one figure — the sum across every account — and
- * nothing else: the per-account breakdown lives on the settings page, one click
- * away, and a badge that expanded into a table would be a page pretending to be
- * a chip.
+ * The plugin registers two providers — the domestic route and the global route
+ * — and their credits are not interchangeable. The badge therefore reads the
+ * session's current model selection, picks the matching realm, and sums only
+ * that realm's accounts. A model under another provider renders nothing: a
+ * WorkBuddy figure attached to a turn that cannot spend it is worse than no
+ * figure at all.
  *
  * It renders nothing when there is nothing to say: no gateway connection, no
- * accounts, or no credit figure at all. An annotation must never be a
+ * matching accounts, or no credit figure at all. An annotation must never be a
  * requirement, and an empty "0" reads as a spent pool rather than as an unknown
  * one.
  *
  * @module dsh-workbuddy2api-gateway/client/credit-badge
  */
 
-import { useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
+import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import { isThinkingLevel } from '../catalog.ts'
+import { postAction } from './status-document.ts'
 import type { PanelStore } from './store.ts'
 import type { Translate } from './copy.ts'
 
@@ -25,6 +28,8 @@ import type { Translate } from './copy.ts'
 export interface CreditBadgeProps {
   t: Translate
   store: PanelStore
+  /** The session's shared model-selection store. */
+  directory: ModelDirectory['store']
 }
 
 /** Compact a credit figure: 4160 → 4,160. */
@@ -33,13 +38,16 @@ function grouped(value: number): string {
 }
 
 /**
- * Render the pool's remaining credit, or nothing.
+ * Render the selected realm's remaining credit, or nothing.
  *
  * The poll starts with the mount and stops with it, exactly like the settings
  * page's: the badge is a second reader of the same store, not a second poller.
  */
-export function WorkBuddy2ApiCreditBadge({ t, store }: CreditBadgeProps): ReactElement | null {
+export function WorkBuddy2ApiCreditBadge({ t, store, directory }: CreditBadgeProps): ReactElement | null {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+  const subscribeDirectory = useCallback((listener: () => void) => directory.subscribe(listener), [directory])
+  const readDirectory = useCallback(() => directory.getSnapshot(), [directory])
+  const selection = useSyncExternalStore(subscribeDirectory, readDirectory, readDirectory).current
   useEffect(() => {
     store.start()
     return () => {
@@ -47,15 +55,57 @@ export function WorkBuddy2ApiCreditBadge({ t, store }: CreditBadgeProps): ReactE
     }
   }, [store])
 
+  // DSH keeps the reasoning level in the session selection, but a model switch
+  // rebuilds that selection from the model's default. Persist the level the user
+  // actually picked for this model, so coming back finds it again.
+  const persistedEfforts = useRef(new Map<string, string>())
+  useEffect(() => {
+    const currentSelection = selection
+    const currentDocument = snapshot.document
+    if (currentSelection === null || currentDocument === undefined) return
+    if (!isThinkingLevel(currentSelection.reasoningEffort)) return
+    const provider = currentSelection.provider
+    const globalId = currentDocument.provider.global?.id
+    if (provider !== currentDocument.provider.id && provider !== globalId) return
+    const model = currentDocument.models.find(entry => entry.id === currentSelection.model)
+    // Only a level that differs from the model's current default is a user
+    // choice worth persisting; writing every default would mask later panel
+    // changes for no reason.
+    if (model === undefined || model.defaultEffort === currentSelection.reasoningEffort) return
+    const modelKey = provider + '|' + currentSelection.model
+    const key = modelKey + '|' + currentSelection.reasoningEffort
+    if (persistedEfforts.current.get(modelKey) === key) return
+    persistedEfforts.current.set(modelKey, key)
+    void postAction({
+      action: 'model',
+      id: currentSelection.model,
+      effort: currentSelection.reasoningEffort,
+    }, currentDocument.controlKey).then(response => {
+      // A transient failure can be retried on the next selection change.
+      if (!response.ok && persistedEfforts.current.get(modelKey) === key) {
+        persistedEfforts.current.delete(modelKey)
+      }
+    })
+  }, [selection, snapshot.document])
+
   const document = snapshot.document
   if (document === undefined || !document.panel.connected || document.accounts.length === 0) return null
-  const known = document.accounts.filter(account => account.credits !== undefined)
+  if (selection === null) return null
+  const realm = selection.provider === document.provider.global.id
+    ? 'global'
+    : selection.provider === document.provider.id
+      ? 'cn'
+      : undefined
+  if (realm === undefined) return null
+  const known = document.accounts.filter(account =>
+    (account.realm === 'global' ? 'global' : 'cn') === realm && account.credits !== undefined)
   if (known.length === 0) return null
   const total = known.reduce((sum, account) => sum + (account.credits ?? 0), 0)
+  const label = realm === 'global' ? t('creditsLeftGlobal') : t('creditsLeftCn')
 
   return (
     <span className="cs-creditBadge" title={t('creditsLeftHint')}>
-      {t('creditsLeftLabel')}
+      {label}
       <b>{grouped(total)}</b>
     </span>
   )

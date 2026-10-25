@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "version": "1.13.0-panel",
+  "apiVersion": 1,
+  "minPanel": "0.4.0",
+  "releaseTag": "server-v1.13.0-panel",
+  "releaseBaseUrl": "https://github.com/functy23/dsh-workbuddy-panel/releases/download",
+  "assets": {
+    "darwin-arm64": {
+      "asset": "workbuddy2api-1.13.0-panel-darwin-arm64.gz",
+      "sha256": "d48a6c46877a340c824f18c4ee5ce77c349b6b0679405c040f48c902005cc87b",
+      "size": 14276994,
+      "downloadSize": 7721207
+    }
+  }
+}

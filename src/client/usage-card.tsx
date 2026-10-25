@@ -67,8 +67,8 @@ type Range = 'all' | '30' | '7'
 export interface UsageCardProps {
   t: Translate
   usage: UsageSummary
-  /** Spendable credits across the pool, when the panel reports any. */
-  creditsLeft?: number
+  /** Spendable credits by realm, when the panel reports them. */
+  creditsLeft?: { cn?: number, global?: number }
 }
 
 /** Short token figure: 1.9B, 84.2M, 12.3K. */
@@ -97,11 +97,11 @@ export function hourLabel(hour: number | undefined, t: Translate): string {
 }
 
 /** One figure in the grid. */
-function Stat({ label, value }: { label: string, value: string }): ReactElement {
+function Stat({ label, value, small }: { label: string, value: string, small?: boolean }): ReactElement {
   return (
     <div className="cs-stat">
       <span className="cs-statLabel">{label}</span>
-      <span className="cs-statValue" title={value}>{value}</span>
+      <span className={small === true ? 'cs-statValue cs-statValueSmall' : 'cs-statValue'} title={value}>{value}</span>
     </div>
   )
 }
@@ -178,6 +178,10 @@ export function UsageCard({ t, usage, creditsLeft }: UsageCardProps): ReactEleme
   const book = metric === 'tokens' && totals.tokens > 0
     ? { copies: Math.max(1, Math.round(totals.tokens / 132_467)), name: t('usageBook') }
     : undefined
+  const creditParts: string[] = []
+  if (creditsLeft?.cn !== undefined) creditParts.push(t('creditsRealmCn') + ' ' + grouped(Math.round(creditsLeft.cn)))
+  if (creditsLeft?.global !== undefined) creditParts.push(t('creditsRealmGlobal') + ' ' + grouped(Math.round(creditsLeft.global)))
+  const creditText = creditParts.length === 0 ? '—' : creditParts.join(' · ')
 
   return (
     <section className="cs-usage" aria-label={t('usageTitle')}>
@@ -211,7 +215,7 @@ export function UsageCard({ t, usage, creditsLeft }: UsageCardProps): ReactEleme
           label={metric === 'tokens' ? t('usageTokensTotal') : t('usageCreditsTotal')}
           value={metric === 'tokens' ? compactTokens(totals.tokens) : grouped(Math.round(totals.credits))}
         />
-        <Stat label={t('creditsLeftLabel')} value={creditsLeft === undefined ? '—' : grouped(Math.round(creditsLeft))} />
+        <Stat small label={t('creditsLeftLabel')} value={creditText} />
         <Stat label={t('usageActiveDays')} value={String(totals.activeDays)} />
         <Stat label={t('usagePeakHour')} value={hourLabel(usage.peakHour, t)} />
         <Stat label={t('usageTopModel')} value={usage.topModel ?? '—'} />

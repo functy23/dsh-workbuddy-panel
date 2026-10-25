@@ -48,6 +48,10 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
   const [token, setToken] = useState('')
   const [copied, setCopied] = useState(false)
   const login = snapshot.document?.login
+  const loginDone = snapshot.document?.loginDone
+  // A challenge from the other realm is not this dialog's link: while the
+  // cancel/start pair is in flight, render "starting" instead of the stale URL.
+  const activeLogin = login !== undefined && login.realm === realm ? login : undefined
 
   useEffect(() => {
     if (!open) return
@@ -71,37 +75,35 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
   }, [open, mode, realm, login, store])
 
   useEffect(() => {
-    if (!open || login === undefined) return
+    if (!open || activeLogin === undefined) return
     const timer = setInterval(() => {
-      void store.act({ action: 'login-poll', state: login.state }, 'login-poll')
+      void store.act({ action: 'login-poll', state: activeLogin.state }, 'login-poll')
     }, POLL_MS)
     return () => {
       clearInterval(timer)
     }
-  }, [open, login, store])
+  }, [open, activeLogin?.state, store])
 
-  // Success is an account that was not there when the dialog opened.
-  //
-  // Watching the challenge instead conflates "the user switched realm or mode"
-  // with "the gateway finished" — every such switch cancels the challenge, and
-  // the old code closed the dialog on that cancellation.
-  const baseline = useRef<number | undefined>(undefined)
-  const accounts = snapshot.document?.accounts.length ?? 0
+  // Success is the host's explicit completion marker, not an account-count
+  // delta: re-signing an existing account, or a refresh that lands late, must
+  // still close the dialog. The first open records the marker that already
+  // exists, so a previous add does not close this one.
+  const doneBaseline = useRef<string | null>(null)
   useEffect(() => {
     if (!open) {
-      baseline.current = undefined
+      doneBaseline.current = null
       return
     }
-    if (baseline.current === undefined) {
-      baseline.current = accounts
+    if (doneBaseline.current === null) {
+      doneBaseline.current = loginDone?.at ?? ''
       return
     }
-    if (accounts > baseline.current) {
-      baseline.current = undefined
+    if (loginDone?.at !== undefined && loginDone.at !== doneBaseline.current) {
+      doneBaseline.current = null
       setToken('')
       onClose()
     }
-  }, [open, accounts, onClose])
+  }, [open, loginDone?.at, onClose])
 
   const submitToken = useCallback(() => {
     void store.act({ action: 'import', payload: token }, 'import').then(() => {
@@ -166,19 +168,19 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
               </div>
             </>
           )
-          : login === undefined
+          : activeLogin === undefined
             ? <p className="wb2-hint cs-center">{t('addStarting')}</p>
             : scan
               ? (
                 <>
-                  <QrView value={login.url} />
+                  <QrView value={activeLogin.url} />
                   <p className="wb2-hint cs-center">{t('addWaiting')}</p>
                   <div className="wb2-dialogActions">
                     <button
                       type="button"
                       className="wb2-linkButton"
                       onClick={() => {
-                        void navigator.clipboard?.writeText(login.url)
+                        void navigator.clipboard?.writeText(activeLogin.url)
                         setCopied(true)
                         setTimeout(() => { setCopied(false) }, 1_500)
                       }}
@@ -187,14 +189,14 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
                     </button>
                     <ActionButton
                       label={t('addPoll')}
-                      onClick={() => { void store.act({ action: 'login-poll', state: login.state }, 'login-poll') }}
+                      onClick={() => { void store.act({ action: 'login-poll', state: activeLogin.state }, 'login-poll') }}
                     />
                   </div>
                 </>
               )
               : (
                 <>
-                  <a className="cs-openButton" href={login.url} target="_blank" rel="noreferrer">
+                  <a className="cs-openButton" href={activeLogin.url} target="_blank" rel="noreferrer">
                     {t('addOpen')}
                   </a>
                   <p className="wb2-hint cs-center">{t('addGlobalHint')}</p>

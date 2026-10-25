@@ -1,3 +1,4 @@
+import { a as GatewayState, c as ServerDownloadStatus, i as GatewayLogLine, l as ServerStatus, n as GATEWAY_HOST_SERVICE_VERSION, o as GatewayStatus, r as GatewayHost, s as ServerDownloadState, t as GATEWAY_HOST_SERVICE } from "./gateway-contract-DtSPpa7v.js";
 import z from "@deepseek-ai/schemastery";
 import { ImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
 import "@earendil-works/pi-ai";
@@ -369,202 +370,6 @@ declare class ConnectionStore {
   patch(patch: Partial<ConnectionSettings>): ConnectionSettings;
 }
 //#endregion
-//#region src/supervisor.d.ts
-/**
- * The process half: this plugin owns the `workbuddy2api` gateway instead of
- * asking the user to run it.
- *
- * "Owns" is deliberate and has three consequences:
- *
- * 1. **It finds the binary.** A configured path wins; otherwise the search walks
- *    the places a locally built gateway usually sits (`~/Downloads/…`, a
- *    `bin/` beside this plugin's data, `/usr/local/bin`, then `PATH`). The
- *    answer is cached until the next explicit refresh so a start attempt is not
- *    a filesystem crawl.
- * 2. **It writes the config.** A missing `config.json` is generated with a
- *    random API key, a loopback listen address, and `auth_dir`/`state_file`
- *    inside this plugin's data directory — so the gateway's state belongs to the
- *    plugin and no path leaks into the user's home by accident. An existing
- *    config is never rewritten: it is the user's file, and the panel hot-applies
- *    changes made through its own API.
- * 3. **It supervises.** The child's stdout/stderr are kept in a ring buffer the
- *    settings page can show, a crash restarts it with exponential backoff up to a
- *    limit, and a stop is always SIGTERM first with a SIGKILL deadline.
- *
- * The one case this file does NOT own is a gateway somebody else started: a
- * healthy `/healthz` with no child process means `external`. The rest of the
- * plugin treats that exactly like a managed one — the difference is only that
- * stopping it is refused, because killing a process this plugin did not spawn
- * would be a surprise, not a feature.
- *
- * @module dsh-workbuddy2api-gateway/supervisor
- */
-/** How the gateway is running right now. */
-type SupervisorState =
-/** No child, and `/healthz` does not answer: nothing is serving this port. */
-'stopped' |
-/** A child was spawned and has not answered a health probe yet. */
-'starting' |
-/** A child this plugin spawned is answering. */
-'running' |
-/** A gateway this plugin did not spawn is answering on the port. */
-'external' |
-/** The last start or the last crash left nothing running. */
-'failed';
-/** One line of gateway output, as the settings page shows it. */
-interface SupervisorLogLine {
-  at: string;
-  stream: 'stdout' | 'stderr' | 'plugin';
-  text: string;
-}
-/** The process snapshot the status document carries. */
-interface SupervisorStatus {
-  state: SupervisorState;
-  /** True only when this plugin spawned the running child. */
-  managed: boolean;
-  pid?: number;
-  /** The resolved executable, when one was found. */
-  binary?: string;
-  /** Where the gateway's document lives. */
-  configPath: string;
-  /** The gateway's working directory (its `auths/` and `data/` live here). */
-  workdir: string;
-  /** The loopback port the health probe uses. */
-  port: number;
-  /** ISO time the current run began. */
-  since?: string;
-  /** How many times this plugin restarted the child after a crash. */
-  restarts: number;
-  /** The most recent exit, when there was one. */
-  lastExit?: {
-    code: number | null;
-    signal: string | null;
-    at: string;
-  };
-  /** Why the last start failed, when it did. */
-  error?: string;
-  /** Whether a crash should be followed by an automatic restart. */
-  autoStart: boolean;
-  /** The tail of the gateway's output, oldest first. */
-  log: readonly SupervisorLogLine[];
-}
-/** What the supervisor reads from the plugin. */
-interface SupervisorOptions {
-  /** The gateway's `config.json` path. */
-  configPath(): string;
-  /** The gateway's working directory. */
-  workdir(): string;
-  /** Where the gateway keeps its accounts; empty means the workdir default. */
-  authDir?(): string;
-  /** A gateway document to inherit from (an existing install), when there is one. */
-  baseConfig?(): Record<string, unknown> | undefined;
-  /** The loopback port to probe. */
-  port(): number;
-  /** Whether a crash restarts the child. */
-  autoStart(): boolean;
-  /** Restarts allowed in one run before the supervisor gives up. */
-  restartLimit(): number;
-  /** Ring-buffer depth for the visible log. */
-  logLimit?: number;
-  /** Where plugin-level events go (the host's logger). */
-  log?(message: string, error?: unknown): void;
-  /** Health probe deadline. */
-  probeTimeoutMs?: number;
-}
-/**
- * Supervise one `workbuddy2api` gateway.
- *
- * Every method is safe to call at any time: the supervisor re-reads the
- * configured paths on each call, so a settings change lands without a restart of
- * the plugin.
- */
-declare class PanelSupervisor {
-  private readonly options;
-  private child?;
-  private stopping;
-  private restartTimer?;
-  private restarts;
-  private since?;
-  private lastExit?;
-  private error?;
-  private state;
-  private readonly logLines;
-  /** Cached executable, dropped whenever a start is asked for explicitly. */
-  private resolvedBinary?;
-  private disposed;
-  constructor(options: SupervisorOptions);
-  /** The ring buffer's depth. */
-  private get limit();
-  /** Append one line, dropping the oldest beyond the limit. */
-  private note;
-  /** The executable this plugin would run right now, or undefined. */
-  /**
-   * The executable this plugin runs: always the one shipped in bin/.
-   *
-   * No PATH walk, no ~/Downloads guess, no per-machine override. A gateway whose
-   * binary could come from anywhere makes the plugin behaviour depend on whatever
-   * else the machine happens to have installed; pinning it to the package means
-   * "install the plugin" and "run this build of the gateway" are the same claim.
-   */
-  resolveBinary(): string | undefined;
-  /** Forget the cached executable (a settings change, or a retry after "not found"). */
-  invalidateBinary(): void;
-  /**
-   * Ensure a usable `config.json`, generating one when it is missing.
-   *
-   * The generated document is minimal on purpose: every field it sets is one the
-   * gateway needs to run at all (listen address, admin key, where accounts and
-   * state live). Anything else — pool strategy, schedules, prompt rewriting — is
-   * left to the gateway's own defaults, which is what its documentation calls a
-   * recommended configuration.
-   */
-  ensureConfig(): {
-    path: string;
-    created: boolean;
-    apiKey?: string;
-  };
-  /** The API key the gateway's `config.json` carries, when it is readable. */
-  /**
-   * Write a new api_key into the gateway config, keeping every other field.
-   *
-   * The settings page promises one key and the gateway honours exactly one: the
-   * document in its own directory. A key stored only here would leave the gateway
-   * answering 401 to its own supervisor (and the web panel locked out), so a
-   * changed key is written there and the process is restarted to honour it.
-   */
-  updateConfigApiKey(key: string): boolean;
-  apiKeyFromConfig(): string | undefined;
-  /**
-   * Probe `/healthz`; the gateway answers 503 when it has no account yet.
-   *
-   * A raw `http` request, not `fetch`: this is a loopback liveness check, and a
-   * `fetch` would honour an ambient proxy — turning "nothing listens here" into
-   * "the proxy answered 503", which is exactly the wrong answer at the wrong
-   * time.
-   */
-  probe(): Promise<boolean>;
-  /** Recompute the state without spawning anything. */
-  refresh(): Promise<SupervisorStatus>;
-  /** Start the gateway if it is not already up. */
-  start(): Promise<SupervisorStatus>;
-  /** Decide what follows one exit: a backed-off restart, or a resting failure. */
-  private afterExit;
-  /**
-   * Stop the gateway.
-   *
-   * A child this plugin spawned gets SIGTERM, then SIGKILL after a grace period.
-   * An external gateway is left alone — the status says so, and the page renders
-   * that refusal as information rather than as a failed action.
-   */
-  stop(): Promise<SupervisorStatus>;
-  /** Stop then start, keeping the restart counter. */
-  restart(): Promise<SupervisorStatus>;
-  /** The current snapshot. */
-  status(): SupervisorStatus;
-  /** Drop the child and every timer, without waiting for anything. */
-  dispose(): void;
-}
-//#endregion
 //#region src/service.d.ts
 /** One account as the browser sees it. */
 interface WebAccount {
@@ -616,6 +421,13 @@ interface WebLogin {
   realm: string;
   startedAt: string;
 }
+/** The last completed account add, so the dialog can close on success. */
+interface WebLoginDone {
+  at: string;
+  realm: string;
+  uid?: string;
+  nickname?: string;
+}
 /** What one poll changed about the catalog. */
 interface WebSync {
   lastSyncedAt?: string;
@@ -647,8 +459,10 @@ interface WebStatus {
     syncHiddenToPanel: boolean;
     autoRegister: boolean;
   };
-  /** The supervised process. */
-  gateway: SupervisorStatus;
+  /** The host-owned process. */
+  gateway: GatewayStatus;
+  /** The separately downloaded server artifact. */
+  server: ServerStatus;
   panel: {
     connected: boolean;
     version?: string;
@@ -677,6 +491,7 @@ interface WebStatus {
   updatedAt?: string;
   error?: string;
   login?: WebLogin;
+  loginDone?: WebLoginDone;
 }
 /** Whether the browser half ever reached this host process. */
 interface WebClientProbe {
@@ -706,7 +521,8 @@ interface WorkBuddy2ApiServiceOptions {
   connection: ConnectionStore;
   overrides: ModelOverridesStore;
   client: PanelClient;
-  supervisor: PanelSupervisor;
+  /** Resolve the host row lazily: either row may load first. */
+  host: () => GatewayHost | undefined;
   cachePath?: string;
   warn?: (message: string, error?: unknown) => void;
   onChange?: () => void;
@@ -724,10 +540,13 @@ declare class WorkBuddy2ApiService {
   private catalog;
   private sync;
   private login?;
+  private loginDone?;
   private loginStartedAt?;
   private clientProbe;
   private usageCache?;
   private inFlight?;
+  /** Whether the last gateway read actually reached it. */
+  private lastReadOk;
   private emptyModelReads;
   /** Consecutive reads that omitted a realm, keyed by realm. */
   private realmGaps;
@@ -745,8 +564,8 @@ declare class WorkBuddy2ApiService {
   private persist;
   /** The merged catalog, for the route's descriptors. */
   catalogModels(): readonly CatalogModel[];
-  /** The supervisor, for the routes that drive the process. */
-  get supervisor(): PanelSupervisor;
+  /** The host row, resolved at call time so a reload cannot pin a dead one. */
+  private host;
   /** Read the gateway once and fold the answer into the snapshot. */
   refresh(): Promise<void>;
   /** The read itself, kept separate so refresh can serialize it. */
@@ -779,12 +598,18 @@ declare class WorkBuddy2ApiService {
   private settled;
   /** Save the connection document (address, key, cadence, sync policy). */
   saveConnection(patch: Partial<ConnectionSettings>): Promise<ActionOutcome>;
-  /** Start the supervised gateway. */
+  /** Start the host-owned gateway. */
   startGateway(): Promise<ActionOutcome>;
-  /** Stop the supervised gateway (refused for one we did not spawn). */
+  /** Stop the host-owned gateway (refused for one the row did not start). */
   stopGateway(): Promise<ActionOutcome>;
-  /** Restart the supervised gateway. */
+  /** Restart the host-owned gateway. */
   restartGateway(): Promise<ActionOutcome>;
+  /** Start the pinned server download; progress is read from status(). */
+  downloadServer(): Promise<ActionOutcome>;
+  /** Abort the in-flight server download. */
+  cancelServerDownload(): Promise<ActionOutcome>;
+  /** Re-hash the installed server binary. */
+  verifyServer(): Promise<ActionOutcome>;
   /** Probe the gateway without changing the process. */
   testConnection(): Promise<ActionOutcome>;
   /** Enable or disable one model in the picker, and/or pin its reasoning level. */
@@ -909,6 +734,12 @@ type GatewayAction = {
 } | {
   action: 'gateway-restart';
 } | {
+  action: 'server-download';
+} | {
+  action: 'server-cancel';
+} | {
+  action: 'server-verify';
+} | {
   action: 'connection';
   panelUrl?: string;
   apiKey?: string;
@@ -971,6 +802,15 @@ declare const WORKBUDDY2API_GATEWAY_VERSION: string;
 declare function pluginDataDir(): string;
 /** The supervised gateway's working directory (its auths/ and data/ live here). */
 declare function gatewayWorkdir(): string;
+/** The gateway's config.json path. */
+/**
+ * The verified server cache.
+ *
+ * The gateway binary is NOT shipped in this package. It lives here, under a
+ * version/platform directory, after its SHA-256 matched the pinned
+ * `server.json`. The host row is the only writer; the panel reads status.
+ */
+declare function serverRootDir(): string;
 declare function gatewayConfigPath(): string;
 //#endregion
 //#region src/index.d.ts
@@ -979,13 +819,12 @@ declare const name = "llm-workbuddy2api-gateway";
 /** The model registry required before the route can register. */
 declare const inject: string[];
 /**
- * Composition defaults.
+ * Composition defaults for the panel row.
  *
- * Everything here is a *default*: the settings page writes its own document for
- * the fields a user changes at runtime (address, key, cadence), and the process
- * fields below are what an install starts from. They are deliberately not marked
- * volatile — the page writes its own store, so a save cannot depend on the host's
- * settings write seam being present.
+ * Process fields live in the host row (`workbuddy2api-gateway-host`) now. The
+ * four deprecated fields stay accepted so an existing profile patch does not
+ * fail schema validation; only `port` is still read, as the default loopback
+ * address before the host service answers.
  */
 declare const Config: z<Config>;
 /** Parsed composition config. */
@@ -1003,4 +842,4 @@ interface Config {
 /** Wire the plugin into the host. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { ACTION_PATH, type AccountOp, type ActionOutcome, type BulkOp, type CatalogModel, Config, type ConnectionSettings, ConnectionStore, DEFAULT_CONNECTION, type GatewayAction, type ModelOverride, ModelOverridesStore, type PanelAccount, PanelClient, PanelError, type PanelModel, type PanelOverview, PanelSupervisor, STATUS_PATH, type SupervisorLogLine, type SupervisorState, type SupervisorStatus, THINKING_LEVELS, type ThinkingLevel, WORKBUDDY2API_GATEWAY_VERSION, WORKBUDDY2API_PROVIDER, type WebAccount, type WebModel, type WebStatus, type WebSync, WorkBuddy2ApiService, apply, buildCatalog, clampRefreshSeconds, createWorkBuddy2ApiAdapter, gatewayConfigPath, gatewayWorkdir, hiddenIds, inject, isThinkingLevel, name, normalizePanelUrl, panelHiddenList, parseAction, pluginDataDir, runAction, safeMessage, visibleIds };
+export { ACTION_PATH, type AccountOp, type ActionOutcome, type BulkOp, type CatalogModel, Config, type ConnectionSettings, ConnectionStore, DEFAULT_CONNECTION, GATEWAY_HOST_SERVICE, GATEWAY_HOST_SERVICE_VERSION, type GatewayAction, type GatewayHost, type GatewayLogLine, type GatewayState, type GatewayStatus, type ModelOverride, ModelOverridesStore, type PanelAccount, PanelClient, PanelError, type PanelModel, type PanelOverview, STATUS_PATH, type ServerDownloadState, type ServerDownloadStatus, type ServerStatus, THINKING_LEVELS, type ThinkingLevel, WORKBUDDY2API_GATEWAY_VERSION, WORKBUDDY2API_PROVIDER, type WebAccount, type WebLogin, type WebLoginDone, type WebModel, type WebStatus, type WebSync, WorkBuddy2ApiService, apply, buildCatalog, clampRefreshSeconds, createWorkBuddy2ApiAdapter, gatewayConfigPath, gatewayWorkdir, hiddenIds, inject, isThinkingLevel, name, normalizePanelUrl, panelHiddenList, parseAction, pluginDataDir, runAction, safeMessage, serverRootDir, visibleIds };

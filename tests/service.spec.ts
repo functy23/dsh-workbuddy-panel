@@ -11,7 +11,7 @@ import { WorkBuddy2ApiService } from '../src/service.ts'
 import { ConnectionStore, DEFAULT_CONNECTION } from '../src/settings-store.ts'
 import { ModelOverridesStore } from '../src/overrides-store.ts'
 import type { PanelClient, PanelModel, PanelOverview } from '../src/panel-client.ts'
-import type { PanelSupervisor, SupervisorStatus } from '../src/supervisor.ts'
+import type { GatewayHost, GatewayState, GatewayStatus, ServerStatus } from '../src/gateway-contract.ts'
 
 /** One model as the gateway reports it. */
 function model(id: string, name = id, efforts: readonly string[] = ['low', 'high']): PanelModel {
@@ -54,19 +54,34 @@ const OVERVIEW: PanelOverview = {
   ],
 } as unknown as PanelOverview
 
-/** A supervisor stand-in that always reads as running and external. */
-const SUPERVISOR = {
-  refresh: async (): Promise<SupervisorStatus> => status(),
+/** A host-row stand-in that always reads as running and external. */
+const HOST = {
+  serviceVersion: 1,
   status,
-  invalidateBinary: () => {},
+  serverStatus: (): ServerStatus => ({
+    platform: 'darwin',
+    arch: 'arm64',
+    supported: true,
+    version: '1.13.0-panel',
+    apiVersion: 1,
+    installed: true,
+    binaryPath: '/tmp/workbuddy2api',
+    sha256: '0'.repeat(64),
+    size: 1,
+    downloadSize: 1,
+    releaseUrl: '',
+    download: { state: 'idle', received: 1, total: 1 },
+  }),
   apiKeyFromConfig: () => 'k',
-} as unknown as PanelSupervisor
+} as unknown as GatewayHost
 
 /** The status every call answers with. */
-function status(): SupervisorStatus {
+function status(): GatewayStatus {
   return {
     state: 'external',
     managed: false,
+    host: 'dsh-subprocess',
+    serverVersion: '1.13.0-panel',
     configPath: '/tmp/config.json',
     workdir: '/tmp',
     port: 7863,
@@ -77,7 +92,11 @@ function status(): SupervisorStatus {
 }
 
 /** Build a service over a scripted gateway. */
-function makeService(models: () => Promise<PanelModel[]>) {
+function makeService(
+  models: () => Promise<PanelModel[]>,
+  hostStatus: () => GatewayStatus = status,
+  clientOverrides: Record<string, unknown> = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'wb2g-svc-'))
   const connection = new ConnectionStore(join(root, 'connection.json'), {
     ...DEFAULT_CONNECTION,
@@ -89,6 +108,7 @@ function makeService(models: () => Promise<PanelModel[]>) {
     models,
     config: async () => ({ raw: { models: { hidden: ['legacy-model'] } } }),
     saveHidden: async () => ({ ok: true }),
+    ...clientOverrides,
   } as unknown as PanelClient
   return new WorkBuddy2ApiService({
     version: '0.1.0-test',
@@ -97,7 +117,7 @@ function makeService(models: () => Promise<PanelModel[]>) {
     connection,
     overrides: new ModelOverridesStore(join(root, 'overrides.json')),
     client,
-    supervisor: SUPERVISOR,
+    host: () => ({ ...HOST, status: hostStatus }) as GatewayHost,
     cachePath: join(root, 'catalog.json'),
   })
 }
@@ -160,6 +180,46 @@ describe('service discovery', () => {
     expect(status.models.map(entry => entry.region)).toEqual(['cn', 'global', 'global'])
   })
 
+  it('publishes a completion marker when a login poll finishes', async () => {
+    let polls = 0
+    const service = makeService(async () => [model('cn:a')], status, {
+      loginStart: async (realm: string) => ({ url: 'https://example.test/login', state: 's1', realm }),
+      loginPoll: async () => {
+        polls += 1
+        return polls === 1 ? { done: false } : { done: true, uid: 'u3', nickname: 'C' }
+      },
+    })
+    await service.loginStart('cn')
+    expect(service.status().login?.realm).toBe('cn')
+    await service.loginPoll('s1')
+    expect(service.status().login).toBeDefined()
+    await service.loginPoll('s1')
+    const done = service.status()
+    expect(done.login).toBeUndefined()
+    expect(done.loginDone).toMatchObject({ realm: 'cn', uid: 'u3', nickname: 'C' })
+  })
+
+  it('ignores a poll from a challenge the dialog already replaced', async () => {
+    let sequence = 0
+    const service = makeService(async () => [model('cn:a')], status, {
+      loginStart: async (realm: string) => ({ url: 'https://example.test/' + realm, state: 's' + String(++sequence), realm }),
+      loginPoll: async () => ({ done: true, uid: 'stale' }),
+    })
+    await service.loginStart('cn')
+    await service.loginStart('global')
+    await service.loginPoll('s1')
+    const current = service.status()
+    expect(current.login?.realm).toBe('global')
+    expect(current.loginDone).toBeUndefined()
+  })
+
+  it('keeps a chosen effort as the model default', async () => {
+    const service = makeService(async () => [model('cn:a', 'A', ['off', 'high', 'max'])])
+    await service.refresh()
+    await service.setModel({ id: 'cn:a', effort: 'max' })
+    expect(service.status().models[0]?.defaultEffort).toBe('max')
+  })
+
   it('scopes bulk enable and disable to one realm', async () => {
     const service = makeService(async () => [model('cn:a'), model('global:b')])
     await service.refresh()
@@ -212,6 +272,17 @@ describe('service discovery', () => {
     for (let read = 0; read < 4; read += 1) await service.refresh()
     expect(service.catalogModels().map(entry => entry.id)).toEqual(['cn:a'])
     expect(service.status().sync.removed).toEqual(['global:b'])
+  })
+
+  it('does not claim a panel connection after the gateway stops', async () => {
+    let state: GatewayState = 'external'
+    const service = makeService(async () => [model('cn:a')], () => ({ ...status(), state }))
+    await service.refresh()
+    expect(service.status().panel.connected).toBe(true)
+    state = 'stopped'
+    const document = service.status()
+    expect(document.panel.connected).toBe(false)
+    expect(document.panel.version).toBeUndefined()
   })
 
   it('reports the pool and the reasoning levels the panel declares', async () => {

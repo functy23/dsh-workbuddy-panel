@@ -39,7 +39,7 @@ const CLIENT_EXTERNALS = [
 
 export default [
   {
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', gateway: 'src/gateway.ts' },
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

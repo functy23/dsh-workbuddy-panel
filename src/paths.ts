@@ -4,7 +4,7 @@
  * Everything lives in one directory under the harness home ($DSH_HOME, else
  * ~/.dsh) so a user can inspect or delete the plugin's state without hunting
  * through the profile tree. The gateway's own working directory sits INSIDE that
- * directory: the process this plugin supervises keeps its auths/ and data/ there,
+ * directory: the host row's managed process keeps its auths/ and data/ there,
  * which is what makes the whole integration self-contained — removing the
  * plugin's directory removes the gateway's state with it.
  *
@@ -13,7 +13,6 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 /** The harness home directory ($DSH_HOME, else ~/.dsh). */
 export function dshHome(): string {
@@ -33,15 +32,14 @@ export function gatewayWorkdir(): string {
 
 /** The gateway's config.json path. */
 /**
- * The gateway executable shipped inside this package.
+ * The verified server cache.
  *
- * A published build carries the binary in bin/ (the npm tarball ships ONLY that,
- * never the source snapshot): a fresh install then works without asking the user
- * to build a Go project first.
+ * The gateway binary is NOT shipped in this package. It lives here, under a
+ * version/platform directory, after its SHA-256 matched the pinned
+ * `server.json`. The host row is the only writer; the panel reads status.
  */
-export function bundledGatewayBinary(): string {
-  const exe = process.platform === 'win32' ? 'workbuddy2api.exe' : 'workbuddy2api'
-  return fileURLToPath(new URL('../bin/' + exe, import.meta.url))
+export function serverRootDir(): string {
+  return join(pluginDataDir(), 'server')
 }
 
 export function gatewayConfigPath(): string {

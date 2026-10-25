@@ -54,6 +54,9 @@ export type GatewayAction =
   | { action: 'gateway-start' }
   | { action: 'gateway-stop' }
   | { action: 'gateway-restart' }
+  | { action: 'server-download' }
+  | { action: 'server-cancel' }
+  | { action: 'server-verify' }
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null, efforts?: readonly ThinkingLevel[] }
@@ -128,6 +131,9 @@ export function parseAction(text: string): GatewayAction | undefined {
     case 'gateway-start': return { action: 'gateway-start' }
     case 'gateway-stop': return { action: 'gateway-stop' }
     case 'gateway-restart': return { action: 'gateway-restart' }
+    case 'server-download': return { action: 'server-download' }
+    case 'server-cancel': return { action: 'server-cancel' }
+    case 'server-verify': return { action: 'server-verify' }
     case 'connection': {
       const panelUrl = strField(body['panelUrl'])
       const apiKey = strField(body['apiKey'])
@@ -266,6 +272,12 @@ export async function runAction(service: WorkBuddy2ApiService, action: GatewayAc
       return service.stopGateway()
     case 'gateway-restart':
       return service.restartGateway()
+    case 'server-download':
+      return service.downloadServer()
+    case 'server-cancel':
+      return service.cancelServerDownload()
+    case 'server-verify':
+      return service.verifyServer()
     case 'connection':
       return service.saveConnection({
         ...action.panelUrl === undefined ? {} : { panelUrl: action.panelUrl },
