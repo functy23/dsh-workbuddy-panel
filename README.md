@@ -1,145 +1,103 @@
 <p align="center">
-  <img src="docs/icon-badge.svg" width="88" height="88" alt="dsh-workbuddy-panel">
+  <img src="https://raw.githubusercontent.com/functy23/dsh-workbuddy-panel/main/docs/icon-badge.svg" width="96" height="96" alt="dsh-workbuddy-panel">
 </p>
 
 <h1 align="center">dsh-workbuddy-panel</h1>
 
-<p align="center">把 <a href="https://github.com/linguo2625469/workbuddy2api-panel">workbuddy2api</a> 网关 <b>托管进 DSH</b>：面板与内核分离，服务端单独下载，宿主组合行通过 <code>ctx.subprocess</code> 托管进程；账号、模型目录、思考档位全部在 DSH 内管理 —— 不需要打开网关的面板网页。</p>
+<p align="center"><b>WorkBuddy2API × DeepSeek Harness</b></p>
 
-![设置页 · 概览](docs/screenshots/overview.png)
+把 [workbuddy2api](https://github.com/linguo2625469/workbuddy2api-panel) 网关接进 DSH 的模型选择器：面板与内核分离，网关本体按 `server.json` 单独下载、校验后由宿主 `ctx.subprocess` 托管；账号池、模型目录、思考档位与额度都在 DSH 设置页里管理，不用再打开网关的网页面板。内核基于 workbuddy2api-panel 构建，出站指纹对齐官方 WorkBuddy Desktop 5.9.2。
 
-## 它做了什么
+## 特点
 
-- **面板 / 内核分离**：面板包只带 UI、目录、路由和 pi-ai provider，约 0.1MB；网关本体是单独的 GitHub Release 资产（gzip 约 4MB），安装时按 `server.json` 的 SHA-256 校验后放进本地缓存。
-- **内核可自行更新**：设置页「网关进程 → 内核更新」直接向 Release 通道查新版本（每小时自动 / 永不，可手动"检查更新"），点「安装内核」即下载、校验、落盘并接管，**不需要等面板发版**。装好的版本记在 `server/manifest.json`，重启继续用它。
-- **宿主托管进程**：host gateway row 通过 `ctx.subprocess` 启动/停止/重启网关，面板不 import `node:child_process`；面板重载不会带走网关。生成完整配置（面板默认 + 随机 API key、loopback 监听）→ 启动 → 崩溃退避重启 → 展示日志。外部已启动的网关照常接管（识别为 `external`，只有"停止"会拒绝）。
-- **模型自动发现**：每轮轮询把网关的模型目录与上一份做 diff（新增 / 移除 / 变更），新增模型自动进入 DSH 选择器，思考档位一并带入；读取失败保留上一份目录。
-- **国内 / 国际双分组**：网关把两个域的模型放在同一个目录里，id 分别带 `cn:` / `global:` 前缀。插件按前缀拆成两个 provider：选择器里是 **`WorkBuddy2API · CN`** 与 **`WorkBuddy2API · Global`** 两个分组，各自只列本域模型，模型名不带前缀。设置页「模型」里用「国内版 / 国际版」切换 Tab 查看和管理，全部启用 / 停用也只作用于当前 Tab 的域。
-- **稳定排序**：网关的 `/panel/api/models` 是遍历 Go map 得到的，顺序每次可能不同；插件先按域、再按 `id` 排序，列表不再跳动。
-- **账号表格**：对齐面板账号页的列（身份 / 状态 / 积分 + 进度条 / 成功·连败 / 请求·Token / 操作），备注里带冷却原因、限流模型数、凭证到期。
-- **登录流程**：列表底部"+ 添加账号"打开弹窗 —— 国内扫码（内置 QR 编码器，无第三方依赖）、国际打开浏览器授权、两域都支持粘贴令牌；账号落地后弹窗自动关闭。
-- **思考档位**：模型行只读展示该模型**支持的全部档位**（如 `off / low / high / max`），不在插件里改档位。
-- **仅显示已勾选**：模型页可按"仅已勾选"过滤，配合"全部启用 / 全部停用 / 同步隐藏到面板"。
-- **输入框额度**：composer dock 按当前模型所属域显示**国内 / 国际**账号池总积分；设置页概览的「剩余积分」也按国内 / 国际分列。其他 provider 的模型不显示本插件额度。
-- **图片输入**：provider 接好了 durable attachment 钩子，带图对话不会报 `UNSUPPORTED_CONTENT`。
+**面板 · DSH 集成**
 
-![设置页 · 模型](docs/screenshots/models.png)
+- **面板 / 内核分离**：面板包约 0.1MB，只带 UI、目录、路由、pi-ai provider 和 `server.json` 清单，不含网关二进制；网关本体是独立的 GitHub Release 资产（gzip ≈4MB，安装 ≈10MB），按清单里的 SHA-256 校验后落盘。
+- **内核独立更新**：设置页「网关进程 → 内核更新」向 Release 通道查新版本（每小时 / 永不），点「安装内核」即下载、校验、落盘，下次启动接管，**不必等面板发版**。
+- **宿主托管进程**：host gateway row 通过 `ctx.subprocess` 启动 / 停止 / 重启，崩溃退避重启、日志可见；面板行重载不影响网关，外部已启动的网关照常接管（停止需回原启动处）。
+- **模型目录自动发现**：轮询时与上一份 diff（新增 / 移除 / 变更），新模型自动进入选择器，思考档位一并带入；读取失败保留上一份目录。
+- **国内 / 国际双分组**：按 `cn:` / `global:` 前缀拆成 `WorkBuddy2API · CN` 与 `WorkBuddy2API · Global` 两个 provider，各自只列本域模型，模型名不带前缀。
+- **稳定排序**：网关目录来自 Go map 遍历，插件按域、再按 `id` 排序，列表不跳动。
+- **账号池**：身份 / 状态 / 积分进度 / 成功·连败 / 请求·Token / 操作；备注里带冷却原因、限流模型数与凭证到期。
+- **登录**：国内扫码（内置 QR 编码器，无第三方依赖）、国际浏览器授权、两域粘贴令牌或账号 JSON；账号落地后弹窗自动关闭。
+- **模型页**：思考档位只读展示，支持「仅已勾选」过滤、全部启用 / 停用、同步隐藏到面板。
+- **用量与额度**：概览页请求数 / Token / 剩余积分 / 活跃天数 / 高峰时段 / 最常用模型与热力图；composer 按当前模型所属域显示账号池总积分。
+- **图片输入**：provider 接了 durable attachment 钩子，带图对话不会报 `UNSUPPORTED_CONTENT`。
 
-![主界面 · 模型选择器](docs/screenshots/selector.png)
+**内核 · 本仓库对上游的改动**
 
-## 安装
+以下改动来自本仓库对上游快照的本地修改；服务端 Release 由这棵树构建。
 
-    dsh plugin --profile web add dsh-workbuddy-panel
+- **UA / 版本更新**：`WorkBuddy/5.9.2 … CLI/2.165.0`，`X-IDE-Version` 同源；`upstream.client_version` / `cli_version` 可覆盖。
+- **设备指纹**：`/v2/report` 的 `reportDelay` 恒 0；`machineId` 改为 UUID 形态（大写、带横线，同一账号稳定）；`sessionId` 进程级随机；OS / CPU / 内存用真机样本缺省值且可配；`commit` / `releaseDate` 对齐 5.9.2；`qimei36` 可注入，缺省**不发**。
+- **Chat 头族**：`X-Agent-Type: main`、`X-Agent-Runtime: other`、`X-Agent-Purpose: conversation`、`X-Private-Data` 按个人 / 企业号取值、`Accept` 用 axios 默认串；去掉 `Accept-Encoding: identity` 与 `X-CodeBuddy-Request`。
+- **身份族**：补 `X-Id-Source` / `X-Department-Info` / `X-Userinfo.id_source`，只在 CLI 链路发。
+- **模型目录端点**：`/console/` 补 `X-Requested-With` 与浏览器 `Accept`，对齐主进程里唯一显式设置这两头的调用。
+- **请求体去品牌化**：`prompt_cache_key` 改 32 位 hex，不再带 `wb2a-<uid8>` 前缀。
+- **三档头族分层**：主进程基线 / CLI 文本会话 / 渲染进程 Web，各端点只带该发出者真会发的头；`X-Device-Token` 仅签到注入。
 
-重启 DSH 后，设置里出现 **WorkBuddy2API**，模型选择器里出现 `workbuddy2api` 分组。面板包约 **0.1MB**；网关本体约 **7.6MB**，单独下载并校验。
+**内核 · 继承自上游**：账号池轮转、熔断与冷却、会话粘性、签到 / 活跃 / 旅行 / 保活、成长任务、`/v1` OpenAI 兼容、SSE 流式、搜索端点、系统提示词体系、请求体指纹清洗。
 
-换个 profile 名就把 `web` 换成那个名字：`dsh plugin --profile <profile> add dsh-workbuddy-panel`。
-**官方 DSH 桌面应用请在应用内的 Settings → Plugins 安装**：那个 profile 归应用的插件管理器管，运行中的 CLI 改不动它。
+## 展示图
 
-首次启动会在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成网关配置与数据目录。服务端不再随插件包发布：打开设置页「网关进程 → 服务端」，点「下载服务端」，或手动从 [Releases](https://github.com/functy23/dsh-workbuddy-panel/releases) 下载对应平台的 `.gz`，解压到 `~/.dsh/workbuddy2api-gateway/server/<version>/<platform>/workbuddy2api`，再点「重新校验」。默认监听 `127.0.0.1:7863`；已有面板安装的配置会被继承，只需把 host row 的 `authDir` 指向它已有的账号目录。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/functy23/dsh-workbuddy-panel/main/docs/screenshots/overview.png" alt="设置页 · 概览" width="860"><br>
+  <sub>设置页 · 概览：用量、额度与热力图</sub>
+</p>
 
-## 版本兼容
+<p align="center">
+  <img src="https://raw.githubusercontent.com/functy23/dsh-workbuddy-panel/main/docs/screenshots/models.png" alt="设置页 · 模型" width="860"><br>
+  <sub>设置页 · 模型：开关、思考档位与计费倍率</sub>
+</p>
 
-`0.3.1` 起，插件**自带并钉死** `@earendil-works/pi-ai`（`dependencies`，精确版本 `0.87.1`），不再声明 peer、也不再向宿主借那一份。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/functy23/dsh-workbuddy-panel/main/docs/screenshots/selector.png" alt="主界面 · 模型选择器" width="860"><br>
+  <sub>主界面 · 模型选择器：WorkBuddy2API 分组</sub>
+</p>
 
-原因是一次真实事故：peer-only + profile 的 `nodeLinker: hoisted` + `autoInstallPeers: false` 三者叠加时，插件没有自己的副本，裸说明符会解析到**别的插件留在 profile 根目录**的旧版 `0.82.1`。那一代的 `estimateMessageTokens` 没有 `system` 分支，宿主一旦下发 system 消息，请求在发出任何 HTTP 之前就以 `PI_AI_ERROR` 崩掉。把 pi-ai 变成真实依赖后，pnpm 必须给插件自己一条依赖边：根上版本冲突时嵌套一份，不冲突时共用同一份——两种布局插件拿到的都是自己钉的那一代。
+## DSH 版本支持
 
-| DSH | 宿主自带 pi-ai（`dsh-llm-pi-ai` 的依赖） | 本插件自带 pi-ai |
+当前组合：面板 **0.5.0** · 内核 **1.14.0-panel** · Node `^22.19.0 || >=24`。支持 DSH `0.1.7-alpha.1` 起（宿主包 peer 范围 `^0.1.7-alpha.1 || ^0.2.0-rc.1`）。
+
+| DSH | 宿主自带 pi-ai | 本插件 pi-ai |
 |---|---|---|
 | `0.1.7-alpha.1` / `0.2.0-rc.1` | `^0.85.1` | `0.87.1` |
 | `0.2.0-rc.2` | `^0.87.1` | `0.87.1` |
 | `0.2.1-rc.2` / `0.2.1-rc.3` | `^1.1.0` | `0.87.1` |
 
-代价说清楚：插件侧不再随宿主升级 Pi，钉的是**一个已知能跑的代际**。跨代混合仍然会发生（插件 0.87.1 对上宿主 1.x），之所以能跑，是因为 provider 以**纯对象**跨过 `dsh-llm-pi-ai` 的边界——`Models.setProvider` 只按 `id` 存、按 `stream` / `streamSimple` / `getModels` 调用，没有 `instanceof`；插件也只使用 `createProvider` / `openAICompletionsApi` 与 Model 描述字段，并对 `getAllModels` 这类 1.x 才有的成员做了条件处理。
+插件**自带并钉死** `@earendil-works/pi-ai@0.87.1`，不声明 peer。原因：profile 的 `nodeLinker: hoisted` + `autoInstallPeers: false` 会让 peer-only 解析到别的插件留在根目录的旧副本；`0.82.1` 的 `estimateMessageTokens` 没有 `system` 分支，请求会在发出前以 `PI_AI_ERROR` 崩掉。最低可运行代际是 `0.87.0`（`MIN_PI_AI_VERSION`），不是钉的版本。
 
-要换代际就改一处：`package.json` 的 `dependencies` 里那个精确版本 → `pnpm install` → `pnpm run check` → 发版。`src/pi-ai-version.ts` 的 `MIN_PI_AI_VERSION` 是**最低可运行代际**（`0.87.0`），不是钉的版本，不要跟着乱动。
+跨代仍可用：provider 以纯对象跨过 `dsh-llm-pi-ai` 的边界，只按 `id` / `stream` / `getModels` 调用，没有 `instanceof`。设置页版本徽章显示插件实际加载的 pi-ai 版本，启动日志同时打印宿主那份（`pi-ai 0.87.1 (host 0.87.1)`）；代际不一致会给出 warn。
 
-设置页概览的版本徽章显示**本插件实际加载到的 pi-ai 版本**；启动日志同时打印宿主那一份（`pi-ai 0.87.1 (host 0.87.1)`）。两者代际不一致、或插件这份低于最低代际时，日志会给出点名到具体原因的 warn，排查版本漂移先看这两处。
+## 安装
 
-服务端版本独立于面板：`server.json` 的 `version` 是当前 pin 的网关版本，`apiVersion` 是面板理解的网关 API 代际，`assets` 是各平台的 gzip 资产和 SHA-256。面板设置页的「服务端」卡显示这两个版本；缓存里是旧版本时会提示升级。
+    dsh plugin --profile web add dsh-workbuddy-panel
 
-**面板和服务端可以分开更新：**
+重启 DSH 后，设置里出现 **WorkBuddy2API**，模型选择器里出现 `WorkBuddy2API · CN` 与 `WorkBuddy2API · Global`。
 
-- **只更新面板**：改 `package.json` 版本并发布，`server.json` 不动；插件管理器更新面板后继续使用现有的服务端缓存，不会重新下载。
-- **只更新内核**：发新的 `server-v*` Release（带 `server.json` 资产）即可；已装的面板在下次自动检查时看到新版本，用户点一下就能装。**面板不用发版**。
-- **两者一起更新**：发新 server Release + 更新包内 `server.json` + 发面板；新装用户直接拿新内核，老用户走自动检查。
-- 无论哪条路径，下载都要过 gzip → 大小 → SHA-256 → 原子 rename；清单只决定"下哪个版本"，不放松校验。镜像只影响下载地址，不影响校验值。
-- 服务端卡里的下载文件是**服务端**的 pin，不是面板包；面板更新不走这个下载，走 DSH 插件管理器 / npm。
-
-如果看到 `pi-ai provider "workbuddy2api" has no configured model ...`：这是目录快照比网关慢一拍（新模型刚出现、或网关启动时短暂返回空目录），`0.3.1` 起会在目录变化时重建适配器快照、对空目录保留上一份，并对单次未知模型做一次目录兜底；升级后仍复现时，把设置页「模型」里的目录和网关日志一起发出来。
-
-## 配置
-
-**panel row**（`llm-workbuddy2api-gateway`）：
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `providerId` | `workbuddy2api` | 模型路由 id（选择器里的分组名） |
-| `displayName` | `WorkBuddy2API` | 分组显示名 |
-| `refreshSeconds` | `15` | 目录轮询间隔 |
-| `apiKey` | `''` | 网关密钥；空 = 用（或生成）网关 config.json 里的 key |
-| `autoRegister` | `true` | 新模型自动进入选择器 |
-
-**host gateway row**（`workbuddy2api-gateway-host`）：
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `port` | `7863` | 网关监听端口 / 健康探测端口 |
-| `autoStart` | `true` | 随 host row 启动，崩溃后退避重启 |
-| `restartLimit` | `5` | 一轮运行内允许的重启次数 |
-| `authDir` | `''` | 账号目录；空 = `<workdir>/auths` |
-| `autoDownload` | `false` | 服务端缺失时自动下载 |
-| `serverBaseUrl` | `''` | 可选 HTTPS 镜像；校验值仍来自 `server.json` |
-
-panel row 的 `port` / `autoStart` / `restartLimit` / `authDir` 仍被接受，但只是旧 patch 的兼容字段；进程配置以 host row 为准。
-
-**密钥只有一个**：在设置页改密钥时，插件会把它写进网关的 `config.json` 并重启网关，避免"插件连不上、面板网页也进不去"。
-
-## 架构
-
-| 文件 | 职责 |
-|---|---|
-| `src/gateway.ts` | host gateway row：服务端缓存 + `ctx.subprocess` 生命周期，注册 `workbuddy2apiGateway` 服务 |
-| `src/gateway-supervisor.ts` | 进程状态机：spawn、停止、退避重启、日志环、`/healthz` 身份探测 |
-| `src/gateway-contract.ts` | host row 与 panel row 的共享状态/服务接口 |
-| `src/server-release.ts` | `server.json` 解析、平台映射、Release URL |
-| `src/server-store.ts` | gzip 下载、SHA-256、原子安装、`current.json` 指针 |
-| `src/service.ts` | 状态聚合：读 `GatewayHost`、网关读取、目录 diff、账号操作、登录流程、用量缓存 |
-| `src/routes.ts` | 两个 loopback 路由：`status`（只读，带 controlKey）与 `action`（controlKey 保护） |
-| `src/adapter.ts` | pi-ai provider：国内 / 国际两条路由指向同一网关 `/v1`，带 attachment 钩子 |
-| `src/catalog.ts` | 目录合并 + 本地覆盖（显示/隐藏、档位）+ 域识别 + **按域、再按 id 排序** |
-| `src/usage.ts` | 读网关用量账本，按天聚合出热力图窗口、高峰时段、最常用模型 |
-| `src/client/*` | DSH 原生 UI：设置页四分区、服务端下载卡、账号表格、添加账号弹窗、用量卡、composer 额度 |
+- **桌面应用**：在 Settings → Plugins 里安装；那个 profile 归应用的插件管理器管，运行中的 CLI 改不动它。换 profile：`dsh plugin --profile <profile> add dsh-workbuddy-panel`。
+- **首次启动**：在 `~/.dsh/workbuddy2api-gateway/gateway/` 生成配置与数据目录；打开设置页「网关进程 → 服务端」点「下载服务端」，校验后落盘。默认监听 `127.0.0.1:7863`。
+- **离线安装**：从 [Releases](https://github.com/functy23/dsh-workbuddy-panel/releases) 下载对应平台的 `.gz`，解压到 `~/.dsh/workbuddy2api-gateway/server/<version>/<platform>/workbuddy2api`，再点「重新校验」。
+- **平台**：`darwin-arm64` / `darwin-x64` / `linux-x64` / `linux-arm64` / `win32-x64`；其他平台会显示「当前平台没有构建」，不会静默失败。
 
 ## 开发
 
     pnpm install
+    pnpm run check       # build + typecheck + test，提交前必须全绿
+
     pnpm run build       # tsdown：ESM host（index + gateway）+ CJS client
     pnpm run typecheck   # tsconfig.json + tsconfig.client.json
-    pnpm run test        # vitest：gateway host / server store / service / client-render
+    pnpm run test        # vitest
 
-    # 本地开发：用 bin/workbuddy2api 生成 server.json 并填缓存
-    pnpm run server:manifest
-    pnpm run server:install-local
+    pnpm run server:manifest       # 用 bin/workbuddy2api 生成 server.json
+    pnpm run server:install-local  # 填充本地服务端缓存
 
-## 已知边界
+- 目录地图、硬性约定与发版流程见 [AGENTS.md](https://github.com/functy23/dsh-workbuddy-panel/blob/main/AGENTS.md)。
+- `upstream/` 是只读快照；`bin/workbuddy2api` 只用于本地生成 manifest / 填充缓存，不进 npm 包。
+- 服务端版本只在 `server.json`；面板版本只在 `package.json`，由 tsdown 注入设置页的版本徽章。
 
-- 路由前缀仍是 `/plugins/workbuddy2api-gateway/*`（改名只动了包名与显示名，避免已有安装的链接与缓存失效）。
-- 设置左侧导航的图标由宿主的 `navIcon(id)` 白名单决定，插件没有 icon 位；本插件给那一行打 `data-wb2a-nav` 标记后用遮罩画出自己的图形。
-- 网关的登录、签到、限流策略属于网关本身，插件只驱动、不重写。
-- **服务端版本有两条进入路径**：包内 `server.json` 是地板（固定版本 + SHA-256），Release 通道是增量（自动检查 + 手动安装）。离线或通道不可达时只按包内 pin 工作，不会静默降级到未校验的二进制。
-- **通道发现走 GitHub API**：未认证请求每小时 60 次/IP，插件一小时最多查一次，够用；API 失败只影响"更没更新"，不影响已装内核。
-- **平台矩阵**：当前 `server.json` 包含 darwin-arm64 / darwin-x64 / linux-x64 / linux-arm64 / win32-x64；其他平台需要先补构建资产，否则设置页会显示「当前平台没有构建」，不会静默失败。
-- **没有 pid**：`ctx.subprocess` 的 handle 不暴露 pid，设置页只显示「由 DSH 宿主托管」；需要 pid 时由网关在 `/healthz` 里补字段。
-- **host row 重载会重启网关**：面板行重载不影响网关；host gateway row 重载会 terminate + 重新 spawn，这是有意的生命周期边界。
+---
 
-## 鸣谢
+<sub>MIT License · 网关上游 [workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel)（fork 自 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api)）· UI 参考 dsh-workbuddy-connect-functy 与 dsh-claude-style</sub>
 
-- **[workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel)**（[Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的 fork）— 本项目托管的网关本体。账号池轮转、熔断与冷却、会话粘性、签到 / 活跃 / 旅行 / 保活、OAuth 登录、OpenAI 兼容层全部来自它。MIT 许可，版权归 Sliverkiss 与 linguo2625469 所有。
-- 本仓库在 upstream/workbuddy2api-panel/ 保存的是**本机工作树的源码快照**：服务端 Release 的二进制由这棵树构建，包含本地对上游的全部修改（复制时有 47 个文件与上游最后一次提交不同）。Git 历史未包含，见 `upstream/workbuddy2api-panel/BUILD-NOTES.md`。npm 面板包**不含二进制**；服务端作为独立 Release 资产发布，插件只通过 HTTP API 读写账号与模型。默认配置模板取自该安装的 `config.json`（见 `src/default-config.ts`），字段结构归上游。
-- 上游仓库目前带有**停止维护声明**，并禁止未授权的反代 / 转卖；使用前请自行确认所在环境的条款。
-- UI 与交互参考了插件 [dsh-workbuddy-connect-functy](https://github.com/functy23) 的实现（账号行、添加账号弹窗、composer 额度徽章）；视觉语言参考插件 **dsh-claude-style**（Claude Style 主题插件）的设计。
-
-## License
-
-MIT
+<sub>上游仓库已停止维护，并禁止未授权的反代 / 转卖；使用前请自行确认所在环境的条款。</sub>
