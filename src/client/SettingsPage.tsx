@@ -22,6 +22,7 @@ import type { StatusDocument } from './status-document.ts'
 import type { Translate } from './copy.ts'
 import { formatTokens } from './copy.ts'
 import type { WebAccount, WebModel } from '../service.ts'
+import type { KernelUpdateStatus, ServerStatus } from '../gateway-contract.ts'
 import type { ThinkingLevel } from '../catalog.ts'
 import { AccountCard, gatewayStateText, gatewayTone } from './panel-view.tsx'
 import { UsageCard } from './usage-card.tsx'
@@ -60,6 +61,14 @@ function relativeTime(iso: string): string {
   if (seconds < 60) return String(seconds) + 's'
   if (seconds < 3600) return String(Math.round(seconds / 60)) + 'm'
   return String(Math.round(seconds / 3600)) + 'h'
+}
+
+/** A byte figure in the compact form the server card uses. */
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '—'
+  if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB'
+  if (value >= 1024) return String(Math.round(value / 1024)) + ' KB'
+  return String(value) + ' B'
 }
 
 /** Status tone for one account. */
@@ -251,14 +260,17 @@ function OverviewTab(props: {
 }): ReactElement {
   const { t, store, document, pending, refresh } = props
   const busy = pending !== undefined
-  const credits = document.accounts.reduce((total, account) => total + (account.credits ?? 0), 0)
-  const withCredits = document.accounts.filter(account => account.credits !== undefined).length
+  const creditFor = (region: 'cn' | 'global'): number | undefined => {
+    const known = document.accounts.filter(account =>
+      (account.realm === 'global' ? 'global' : 'cn') === region && account.credits !== undefined)
+    return known.length === 0 ? undefined : known.reduce((sum, account) => sum + (account.credits ?? 0), 0)
+  }
   return (
     <>
       <UsageCard
         t={t}
         usage={document.usage}
-        creditsLeft={document.accounts.reduce((total, account) => total + (account.credits ?? 0), 0)}
+        creditsLeft={{ cn: creditFor('cn'), global: creditFor('global') }}
       />
 
       <SettingsGroup title={t('quickTitle')} description={t('quickDesc')}>
@@ -504,6 +516,220 @@ function AccountsTab(props: {
   )
 }
 
+/** The separately downloaded server artifact. */
+function ServerCard(props: {
+  t: Translate
+  store: PanelStore
+  server: ServerStatus
+  pending?: string
+}): ReactElement {
+  const { t, store, server, pending } = props
+  const busy = pending !== undefined
+  const download = server.download
+  const pct = download.total > 0
+    ? Math.min(100, Math.max(0, Math.round((download.received / download.total) * 100)))
+    : 0
+  const working = download.state === 'downloading' || download.state === 'verifying' || download.state === 'installing'
+  const stateText = !server.supported
+    ? t('serverStateUnsupported')
+    : download.state === 'downloading'
+      ? t('serverStateDownloading')
+      : download.state === 'verifying'
+        ? t('serverStateVerifying')
+        : download.state === 'installing'
+          ? t('serverStateInstalling')
+          : download.state === 'failed'
+            ? t('serverStateFailed')
+            : download.state === 'cancelled'
+              ? t('serverStateCancelled')
+              : server.installed
+                ? t('serverStateReady')
+                : t('serverStateMissing')
+  const tone: 'ok' | 'warn' | 'error' = server.installed ? 'ok' : download.state === 'failed' ? 'error' : 'warn'
+  const rawError = download.error ?? server.error
+  const error = rawError === undefined
+    ? undefined
+    : rawError.includes('HTTP 404')
+      ? t('serverErrorNotFound')
+      : rawError.toLowerCase().includes('checksum')
+        ? t('serverErrorChecksum')
+        : rawError
+  const openRelease = (): void => {
+    if (typeof window !== 'undefined' && server.releaseUrl !== '') {
+      window.open(server.releaseUrl, '_blank', 'noopener,noreferrer')
+    }
+  }
+  return (
+    <SettingsGroup
+      title={t('serverTitle')}
+      description={t('serverDesc')}
+      action={(
+        <>
+          {download.state === 'downloading'
+            ? (
+              <ActionButton
+                label={t('serverCancel')}
+                disabled={busy}
+                onClick={() => { void store.act({ action: 'server-cancel' }, 'server-cancel') }}
+              />
+            )
+            : (
+              <ActionButton
+                label={server.installed ? t('serverVerify') : t('serverDownload')}
+                tone={server.installed ? undefined : 'primary'}
+                disabled={busy || !server.supported}
+                onClick={() => {
+                  void store.act(
+                    server.installed ? { action: 'server-verify' } : { action: 'server-download' },
+                    server.installed ? 'server-verify' : 'server-download',
+                  )
+                }}
+              />
+            )}
+          {!server.installed && (download.state === 'failed' || download.state === 'cancelled')
+            ? (
+              <ActionButton
+                label={t('serverRetry')}
+                disabled={busy}
+                onClick={() => { void store.act({ action: 'server-download' }, 'server-download') }}
+              />
+            )
+            : null}
+          {server.releaseUrl === ''
+            ? null
+            : <ActionButton label={t('serverOpenRelease')} onClick={openRelease} />}
+        </>
+      )}
+    >
+      <SettingRow
+        title={(
+          <>
+            <StatusDot tone={tone} title={stateText} />
+            {t('serverTitle')}
+            <Badge tone={tone}>{stateText}</Badge>
+          </>
+        )}
+        error={error}
+        description={server.installedVersion !== undefined && server.installedVersion !== server.version
+          ? t('serverUpdateAvailable', server.installedVersion, server.version)
+          : undefined}
+      />
+      <SettingRow title={t('serverVersion')} control={<span className="wb2-mono">{server.version}</span>} />
+      <SettingRow title={t('serverPlatform')} control={<span className="wb2-mono">{server.platform + ' / ' + server.arch}</span>} />
+      <SettingRow
+        title={t('serverDownloadSize')}
+        control={<span className="wb2-mono">{formatBytes(server.downloadSize) + ' / ' + formatBytes(server.size)}</span>}
+      />
+      <SettingRow
+        title={t('serverChecksum')}
+        control={<span className="wb2-mono">{server.sha256 === '' ? '—' : server.sha256.slice(0, 16) + '…'}</span>}
+      />
+      {server.binaryPath === undefined
+        ? null
+        : <SettingRow title={t('serverPath')} control={<span className="wb2-mono">{server.binaryPath}</span>} />}
+      {working
+        ? (
+          <>
+            <div className="cs-credBar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+              <i style={{ width: pct + '%' }} />
+            </div>
+            <p className="wb2-hint">{t('serverProgress', pct, formatBytes(download.received), formatBytes(download.total))}</p>
+          </>
+        )
+        : null}
+      <p className="wb2-hint">{t('serverPanelUpdateHint')}</p>
+      <p className="wb2-hint">{t('serverManualHint')}</p>
+    </SettingsGroup>
+  )
+}
+
+/** Kernel updates: the release channel, its cadence, and one-click install. */
+function KernelCard(props: {
+  t: Translate
+  store: PanelStore
+  kernel: KernelUpdateStatus
+  server: ServerStatus
+  pending?: string
+}): ReactElement {
+  const { t, store, kernel, server, pending } = props
+  const busy = pending !== undefined
+  const tone: 'ok' | 'warn' | 'error' = kernel.error !== undefined
+    ? 'error'
+    : kernel.available
+      ? 'warn'
+      : 'ok'
+  const badgeTone: 'ok' | 'warn' | 'error' | 'muted' = tone
+  const stateText = kernel.error !== undefined
+    ? t('kernelStateError')
+    : kernel.installing
+      ? t('kernelStateInstalling')
+      : kernel.available
+        ? t('kernelStateAvailable')
+        : t('kernelStateIdle')
+  const lastCheck = kernel.lastCheckedAt === undefined
+    ? '—'
+    : new Date(kernel.lastCheckedAt).toLocaleString()
+  return (
+    <SettingsGroup
+      title={t('kernelTitle')}
+      description={t('kernelDesc')}
+      action={(
+        <>
+          <ActionButton
+            label={t('kernelCheck')}
+            disabled={busy || kernel.installing}
+            onClick={() => { void store.act({ action: 'kernel-check' }, 'kernel-check') }}
+          />
+          {kernel.available
+            ? (
+              <ActionButton
+                label={t('kernelInstall')}
+                tone="primary"
+                disabled={busy || kernel.installing}
+                onClick={() => { void store.act({ action: 'kernel-install' }, 'kernel-install') }}
+              />
+            )
+            : null}
+        </>
+      )}
+    >
+      <SettingRow
+        title={(
+          <>
+            <StatusDot tone={tone} title={stateText} />
+            {t('kernelTitle')}
+            <Badge tone={badgeTone}>{stateText}</Badge>
+          </>
+        )}
+        error={kernel.error}
+      />
+      <SettingRow
+        title={t('kernelCadence')}
+        control={(
+          <SegmentedField
+            label={t('kernelCadence')}
+            value={kernel.cadence}
+            disabled={busy || kernel.installing}
+            onChange={(value) => {
+              void store.act(
+                { action: 'kernel-cadence', cadence: value === 'never' ? 'never' : 'hourly' },
+                'kernel-cadence',
+              )
+            }}
+            options={[
+              { value: 'hourly', label: t('kernelCadenceHourly') },
+              { value: 'never', label: t('kernelCadenceNever') },
+            ]}
+          />
+        )}
+      />
+      <SettingRow title={t('kernelCurrent')} control={<span className="wb2-mono">{server.version}</span>} />
+      <SettingRow title={t('kernelLatest')} control={<span className="wb2-mono">{kernel.latestVersion ?? '—'}</span>} />
+      <SettingRow title={t('kernelLastCheck')} control={<span className="wb2-mono">{lastCheck}</span>} />
+    </SettingsGroup>
+  )
+}
+
 /** The process: state, controls, where it lives, and what it printed. */
 function GatewayTab(props: {
   t: Translate
@@ -514,9 +740,12 @@ function GatewayTab(props: {
   const { t, store, document, pending } = props
   const busy = pending !== undefined
   const gateway = document.gateway
+  const server = document.server
   const tone = gatewayTone(gateway.state)
   return (
     <>
+      <ServerCard t={t} store={store} server={server} pending={pending} />
+      <KernelCard t={t} store={store} kernel={document.kernel} server={server} pending={pending} />
       <SettingsGroup
         title={t('gatewayTitle')}
         description={t('gatewayDesc')}
@@ -528,13 +757,13 @@ function GatewayTab(props: {
                 <ActionButton
                   label={t('gatewayStart')}
                   tone="primary"
-                  disabled={busy}
+                  disabled={busy || !server.installed || gateway.state === 'host-unavailable'}
                   onClick={() => { void store.act({ action: 'gateway-start' }, 'gateway-start') }}
                 />
               )}
             <ActionButton
               label={t('gatewayRestart')}
-              disabled={busy}
+              disabled={busy || !server.installed}
               onClick={() => { void store.act({ action: 'gateway-restart' }, 'gateway-restart') }}
             />
             {gateway.managed
@@ -558,7 +787,7 @@ function GatewayTab(props: {
               <Badge tone={tone === 'ok' ? 'ok' : tone === 'error' ? 'error' : tone === 'warn' ? 'warn' : 'muted'}>
                 {gatewayStateText(gateway.state, t)}
               </Badge>
-              {gateway.pid === undefined ? null : <Badge tone="muted">{t('gatewayPid', gateway.pid)}</Badge>}
+              {gateway.serverVersion === undefined ? null : <Badge tone="muted">{t('gatewayServerVersion', gateway.serverVersion)}</Badge>}
               {gateway.managed ? <Badge tone="muted">{t('gatewayManaged')}</Badge> : null}
             </>
           )}

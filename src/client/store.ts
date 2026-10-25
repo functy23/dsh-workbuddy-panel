@@ -38,6 +38,9 @@ export interface StoreSnapshot {
 /** Poll cadence while a surface is mounted; the host refreshes its own copy. */
 const POLL_MS = 5_000
 
+/** Faster cadence while a server download is in flight. */
+const POLL_FAST_MS = 1_000
+
 /** The shared store. */
 export class PanelStore {
   private listeners = new Set<() => void>()
@@ -45,6 +48,7 @@ export class PanelStore {
   private timer?: ReturnType<typeof setInterval>
   private refs = 0
   private inFlight?: Promise<void>
+  private pollMs = POLL_MS
 
   /** Subscribe; returns the disposer React's `useSyncExternalStore` wants. */
   subscribe = (listener: () => void): (() => void) => {
@@ -71,6 +75,19 @@ export class PanelStore {
       loading: false,
       error: undefined,
     })
+    const next = document.server.download.state === 'downloading' ? POLL_FAST_MS : POLL_MS
+    if (next !== this.pollMs) {
+      this.pollMs = next
+      if (this.timer !== undefined) this.schedule()
+    }
+  }
+
+  /** Re-arm the interval at the current cadence. */
+  private schedule(): void {
+    if (this.timer !== undefined) clearInterval(this.timer)
+    this.timer = setInterval(() => {
+      void this.refresh()
+    }, this.pollMs)
   }
 
   /** Read the status document. Concurrent calls share one request. */
@@ -123,9 +140,7 @@ export class PanelStore {
     this.refs += 1
     if (this.timer === undefined) {
       void this.refresh()
-      this.timer = setInterval(() => {
-        void this.refresh()
-      }, POLL_MS)
+      this.schedule()
     }
   }
 

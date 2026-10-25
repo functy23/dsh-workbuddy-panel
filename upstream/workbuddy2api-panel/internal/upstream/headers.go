@@ -41,12 +41,14 @@ import (
 
 const (
 	// defaultClientVersion 出站 WorkBuddy 客户端版本段（UA 的 `WorkBuddy/<ver>` 与
-	// X-IDE-Version）。对齐官方 WorkBuddy Desktop 5.8.3 分发包（asar package.json
-	// version=5.8.3，Electron 37.10.3）。config upstream.client_version 可覆盖。
-	defaultClientVersion = "5.8.3"
-	// defaultCliVersion 出站 UA 中 `CLI/<ver>` 段版本。对齐官方 5.8.3 内置 CLI
-	// （~/.workbuddy/sessions/*.json 的 version=2.161.0）。config upstream.cli_version 可覆盖。
-	defaultCliVersion = "2.161.0"
+	// X-IDE-Version）。对齐官方 WorkBuddy Desktop **5.9.2** 分发包（asar package.json
+	// version=5.9.2，Electron 37.10.3 / Chrome 138.0.7204.251）。
+	// config upstream.client_version 可覆盖。
+	defaultClientVersion = "5.9.2"
+	// defaultCliVersion 出站 UA 中 `CLI/<ver>` 段版本。对齐官方 5.9.2 内置 CLI
+	// （app.asar.unpacked/cli/package.json version=2.165.0）。
+	// config upstream.cli_version 可覆盖。
+	defaultCliVersion = "2.165.0"
 
 	// ideName 官方 X-IDE-Type / X-IDE-Name 固定值（产品名，不是部署类型）。
 	ideName = "WorkBuddy"
@@ -57,12 +59,26 @@ const (
 
 	// agentIntentCraft 官方 X-Agent-Intent 默认值（ask / craft）。
 	agentIntentCraft = "craft"
-	// agentTypeCLI 官方 X-Agent-Type 默认值（会话 agent 名）。
-	agentTypeCLI = "cli"
+	// agentTypeMain 官方 X-Agent-Type 的默认取值。
+	//
+	// 5.9.2 的取值域只有 resolveModelCallAgentType 的
+	// main / team / subagent / compaction / auxiliary —— "cli" 是**遥测里的 agentName**，
+	// 不是这个头的取值（旧实现把两者混为一谈）。
+	agentTypeMain = "main"
+	// agentRuntimeOther 官方 X-Agent-Runtime 的默认取值。
+	//
+	// resolveSessionAgentRuntime = meta["codebuddy.ai/agentRuntime"] ??
+	// process.env.CODEBUDDY_AGENT_RUNTIME ?? "other"，且构造点**无条件写入**该头。
+	// 桌面端文本会话不设这两个来源，故实际恒为 "other"。
+	agentRuntimeOther = "other"
 	// agentPurposePersonal 个人身份会话的 X-Agent-Purpose（CLI 在 PERSONAL_AGENT_ROLE
-	// 下写死 person_agent，报告 §4.1 实测抓样同值）。
+	// 下写死 person_agent）。
+	//
+	// 注意：该分支存在但**桌面端从不打开**——PERSONAL_AGENT_ROLE 在全包只有读取点、
+	// 没有任何赋值点（环境是 module 69525 的 process.env Proxy，只能由启动环境外部注入）。
+	// 故默认形态按实际观测发 agentPurposeGeneral；本常量仅作语义标注，不参与出站。
 	agentPurposePersonal = "person_agent"
-	// agentPurposeGeneral 企业/非个人会话的 X-Agent-Purpose（VLM 代理链路也用它）。
+	// agentPurposeGeneral 非 PERSONAL_AGENT_ROLE 会话的 X-Agent-Purpose（VLM 代理链路也用它）。
 	agentPurposeGeneral = "conversation"
 
 	originRefererCN     = "https://www.codebuddy.cn"
@@ -255,7 +271,10 @@ func (c *Client) injectIdentity(req *http.Request, a *auth.Auth) {
 // userinfoHeader 构造官方 X-Userinfo：base64(JSON({uin,owner_uin,id_source,token_source}))。
 // 官方只在 uid 非空且（有企业 / 有 idSource / 有 method）时发送；本项目恒有
 // token_source=plugin，故 uid 非空即发。字段顺序与官方一致（uin → owner_uin →
-// token_source），便于抓包比对。
+// id_source → token_source），便于抓包比对。
+//
+// id_source 是 5.9.2 的 runIdentityHeaders() 在 account.idSource 非空时**必带**的键，
+// 旧实现漏了它（载荷比官方少一段，属可辨差异）。
 func userinfoHeader(a *auth.Auth) string {
 	if a == nil || a.UID == "" {
 		return ""
@@ -274,6 +293,10 @@ func userinfoHeader(a *auth.Auth) string {
 	if a.EnterpriseID != "" {
 		b.WriteString(`,"owner_uin":`)
 		b.Write(mustJSONString(a.EnterpriseID))
+	}
+	if a.IDSource != "" {
+		b.WriteString(`,"id_source":`)
+		b.Write(mustJSONString(a.IDSource))
 	}
 	b.WriteString(`,"token_source":"`)
 	b.WriteString(authMethodPlugin)
@@ -317,22 +340,32 @@ func (c *Client) injectIDEFamily(req *http.Request) {
 // injectModelAttribution 注入只在**模型请求**上出现的官方指纹头：
 // X-Agent-Purpose 与 X-Private-Data（取值按 CLI 文本会话形态）。
 //
-// 取值证据（cli/dist/codebuddy-lite-wb.mjs）：
+// 取值证据（cli/dist/codebuddy-lite-wb.mjs，5.9.2）：
 //
 //	PERSONAL_AGENT_ROLE ? "person_agent" : <会话 purpose>
-//	    → 个人身份会话发 person_agent（报告 §4.1 的实测抓样即此值）
-//	privateData = enableModelOptimization.enabled !== false ? "false" : "true"
-//	    → 默认开启「用我的数据优化模型」→ 发 false
+//	    → 分支存在，但 PERSONAL_AGENT_ROLE 在桌面端**无任何赋值点**（环境是
+//	      process.env Proxy，只有外部启动环境能注入）→ 实际恒发会话 purpose。
+//	A = resolveModelOptimizationEnabled({explicitEnabled, productDefaultEnabled, isEnterpriseEdition})
+//	  = explicitEnabled ?? (!isEnterpriseEdition && (productDefaultEnabled ?? true))
+//	X-Private-Data = A ? "false" : "true"
+//	    → 个人号默认 false；企业号 true；custom 模型/skip-merge 场景删头。
 //
 // 注意：main/server.js 的 applyGatewayHeaders 写死 conversation/true，那是
 // **skills VLM 代理**链路的取值（见 chatFingerprintVLM），不是文本会话的。
 func (c *Client) injectModelAttribution(req *http.Request, a *auth.Auth) {
+	// X-Agent-Purpose：桌面端从不设置 PERSONAL_AGENT_ROLE（全包只有读取点），
+	// 故实际恒发会话 purpose（文本会话 = "conversation"）。
+	req.Header.Set("X-Agent-Purpose", agentPurposeGeneral)
+	// X-Private-Data 由 resolveModelOptimizationEnabled 决定（cli/dist 模型 provider）：
+	//   A = explicitEnabled ?? (!isEnterpriseEdition && (productDefaultEnabled ?? true))
+	//   头值 = A ? "false" : "true"
+	// 即：个人号默认发 "false"（用我的数据优化模型 = 开），企业号发 "true"。
+	// 旧实现恒 "false"——个人号对、企业号错。
 	if a != nil && a.IsEnterprise() {
-		req.Header.Set("X-Agent-Purpose", agentPurposeGeneral)
+		req.Header.Set("X-Private-Data", "true")
 	} else {
-		req.Header.Set("X-Agent-Purpose", agentPurposePersonal)
+		req.Header.Set("X-Private-Data", "false")
 	}
-	req.Header.Set("X-Private-Data", "false")
 }
 
 // injectClientIP 在 PassthroughIP 开启时把 clientIP 参数透传给上游（三等价头）。
@@ -393,19 +426,43 @@ func (c *Client) CommonHeaders(req *http.Request, a *auth.Auth) {
 	attachAuth(req, a)
 }
 
-// injectCLIIdentity 追加 CLI 身份拦截器独有的两头（X-Auth-Method / X-Userinfo）。
+// injectCLIIdentity 追加 CLI 身份拦截器独有的头族。
 //
 // 证据：main/*.js 里 X-Userinfo / X-Auth-Method 出现 **0 次**；cli/dist 的
-// runIdentityHeaders() 必发这两条（报告 §2.3 层 2、§4.1 抓样）。故只在
-// chat / search / refresh（都在 CLI 侧发出）注入，主进程请求不带。
+// runIdentityHeaders() + AuthenticationHttpInterceptor 在 CLI 侧必发：
+//
+//	X-Auth-Method、X-Userinfo、X-Id-Source（有 idSource）、
+//	X-Department-Info（有 departmentFullName）。
+//
+// 故只在 chat / search / refresh（都在 CLI 侧发出）注入，主进程请求不带。
 func injectCLIIdentity(req *http.Request, a *auth.Auth) {
 	if a == nil {
 		return
 	}
 	req.Header.Set("X-Auth-Method", authMethodPlugin)
+	if a.IDSource != "" {
+		req.Header.Set("X-Id-Source", a.IDSource)
+	}
+	if a.DepartmentFullName != "" {
+		req.Header.Set("X-Department-Info", a.DepartmentFullName)
+	}
 	if ui := userinfoHeader(a); ui != "" {
 		req.Header.Set("X-Userinfo", ui)
 	}
+}
+
+// applyModelCatalogHeaders 给**模型目录端点**补上主进程里少见的浏览器形状两头。
+//
+// 证据：app.asar/main/account.js#getModels 是主进程里唯一显式写
+// Accept: "application/json, text/plain, */*" + X-Requested-With: "XMLHttpRequest"
+// 的 API 调用（其余主进程请求都是 axios 默认 + 无 X-Requested-With）。
+// 只对 /console/ 目录端点生效：global 的 /v2 目录是另一条链路，多带反而是偏差。
+func applyModelCatalogHeaders(req *http.Request, path string) {
+	if req == nil || !strings.Contains(path, "/console/") {
+		return
+	}
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 }
 
 // acceptLanguageFor 按账号 realm 返回 Accept-Language：global → en-US，cn → zh-CN。
@@ -432,19 +489,20 @@ type ChatMeta struct {
 // PassthroughIP=false 或 clientIP 为空时不注入 IP 头。
 func (c *Client) ChatHeaders(req *http.Request, a *auth.Auth, clientIP string, meta ChatMeta) {
 	c.CommonHeaders(req, a)
-	// 官方模型请求由 OpenAI SDK 发 Accept: application/json（报告 §4.1），
+	// Accept 用 axios 默认头串：CLI 的模型请求构造区**没有**显式 Accept，
+	// 落到 axios 默认 `application/json, text/plain, */*`（5.9.2 实测如此；
+	// 只有 web search/fetch 路径才显式写 application/json）。
 	// 流式与否由 body 的 stream 字段决定，与 Accept 无关。
-	req.Header.Set("Accept", "application/json")
-	// Accept-Encoding: identity —— 官方 fetch 层显式设置（report §4.1 抓包可见）。
-	// 同时避免 Go 传输层自动加 gzip 并在 SSE 上做透明解压（多一层缓冲）。
-	req.Header.Set("Accept-Encoding", "identity")
-	// CLI 模型请求专属头族：身份拦截器两头 + X-IDE-* + X-Agent-* + 风控闸门头。
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	// 刻意**不**发 Accept-Encoding：5.9.2 的 CLI/模型链路没有任何 identity 设置，
+	// 由底层 fetch 自带 gzip/deflate（旧实现写死 identity 属可辨差异）。
+	// CLI 模型请求专属头族：身份拦截器两头 + X-IDE-* + X-Agent-*（含 runtime）。
 	// （主进程基线里没有这些，见 CommonHeaders 注释。）
 	injectCLIIdentity(req, a)
 	c.injectIDEFamily(req)
 	req.Header.Set("X-Agent-Intent", agentIntentCraft)
-	req.Header.Set("X-Agent-Type", agentTypeCLI)
-	req.Header.Set("X-CodeBuddy-Request", "1")
+	req.Header.Set("X-Agent-Type", agentTypeMain)
+	req.Header.Set("X-Agent-Runtime", agentRuntimeOther)
 	// 模型请求专属的两头（billing 请求官方不发，见 injectModelAttribution）。
 	c.injectModelAttribution(req, a)
 	// 注意：**不**在这里注入 X-Device-Token。官方该头是签到专属
@@ -510,8 +568,12 @@ func (c *Client) applyVLMGatewayHeaders(req *http.Request, meta ChatMeta, traceI
 	req.Header.Set("X-Agent-Purpose", agentPurposeGeneral)
 	req.Header.Set("X-Private-Data", "true")
 	req.Header.Del("X-Agent-Type")
+	// VLM 代理链路（main/server.js applyGatewayHeaders）没有 X-Agent-Runtime。
+	req.Header.Del("X-Agent-Runtime")
 	req.Header.Del("X-Userinfo")
 	req.Header.Del("X-Auth-Method")
+	req.Header.Del("X-Id-Source")
+	req.Header.Del("X-Department-Info")
 	req.Header.Del("X-Root-Request-ID")
 	// b3 四段 + X-B3-ParentSpanId（applyTraceHeaders 的写法）。
 	if !validTraceID(traceID) {

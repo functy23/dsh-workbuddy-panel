@@ -27,6 +27,7 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import { WorkBuddy2ApiSettingsPage } from './SettingsPage.tsx'
@@ -45,11 +46,12 @@ export const name = 'dsh-workbuddy-panel-client'
 /**
  * Client services required by this browser half.
  *
- * `modelDirectories` is not named here — this page does not read session model
- * state — and none of the seat owners is either: the slots this bundle
- * registers into belong to three different packages, and the seam each host
- * ships is discovered by slot-declaration lifetime rather than by activation
- * order.
+ * `modelDirectories` is reached through a scoped `ctx.inject` in the composer
+ * credit badge — it may arrive after this fiber starts, and only that seat needs
+ * the session's selected route. The other seat owners are not named here either:
+ * the slots this bundle registers into belong to different packages, and the
+ * seam each host ships is discovered by slot-declaration lifetime rather than by
+ * activation order.
  */
 export const inject = ['slots', 'locale', 'remote']
 
@@ -107,6 +109,11 @@ interface LocaleSeam {
 
 interface LayoutSeam {
   selectPanel(id: string | null): void
+}
+
+/** The session model-directory resolver, typed by the one call this bundle makes. */
+interface ModelDirectoriesSeam {
+  directoryFor(sessionId: string): { store: ModelDirectory['store'] }
 }
 
 /**
@@ -224,14 +231,27 @@ export function apply(ctx: ClientContext): void {
   // card that used to carry it is gone: the composer is where a turn is spent
   // from, so that is where the figure belongs.
   guard('composer credits', () => {
-    slots.inject('conversation.composer.dock', () => (
-      guard('composer credits', () => slots.register({
-        name: 'conversation.composer.dock',
-        id: 'workbuddy2api-credits',
-        order: 100,
-        inject: (): { t: Translate, store: typeof panelStore } => ({ t: panelT, store: panelStore }),
-      }, WorkBuddy2ApiCreditBadge)) ?? NOOP_DISPOSER
-    ))
+    // The badge must know which of our two routes the session selected: the
+    // domestic and global pools are not convertible, so one figure cannot stand
+    // for both. The model-directory service may arrive after this fiber starts,
+    // hence the scoped inject rather than an eager read.
+    ctx.inject(['modelDirectories'], scope => {
+      const modelDirectories = (scope as unknown as { modelDirectories: ModelDirectoriesSeam }).modelDirectories
+      guard('composer credits', () => {
+        slots.inject('conversation.composer.dock', () => (
+          guard('composer credits', () => slots.register({
+            name: 'conversation.composer.dock',
+            id: 'workbuddy2api-credits',
+            order: 100,
+            inject: (sessionId: string) => ({
+              t: panelT,
+              store: panelStore,
+              directory: modelDirectories.directoryFor(sessionId).store,
+            }),
+          }, WorkBuddy2ApiCreditBadge)) ?? NOOP_DISPOSER
+        ))
+      })
+    })
   })
 
   // The settings navigation draws its glyph from a host-side, id-keyed map

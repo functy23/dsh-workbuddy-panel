@@ -68,9 +68,77 @@ func TestReportDesktopEventFingerprint(t *testing.T) {
 	if ev["mode"] != "craft" {
 		t.Errorf("业务字段 mode=%v 被指纹覆盖或缺失", ev["mode"])
 	}
-	// machineId 应为 uid 稳定派生（36 hex）。
-	if len(ev["machineId"].(string)) != 36 {
-		t.Errorf("machineId 长度=%d want 36", len(ev["machineId"].(string)))
+	// machineId：官方是 IOPlatformUUID（8-4-4-4-12 大写 UUID）；旧实现是 36 位连续 hex。
+	machineID, _ := ev["machineId"].(string)
+	if !isUUIDv4Shape(strings.ToLower(machineID)) {
+		t.Errorf("machineId=%q 应为 8-4-4-4-12 UUID（IOPlatformUUID 形态）", machineID)
+	}
+	if machineID != strings.ToUpper(machineID) {
+		t.Errorf("machineId=%q 应为大写（真机 IOPlatformUUID 是大写）", machineID)
+	}
+	// sessionId：进程级 UUID（一次 app 运行一个），不是按 uid 稳定派生。
+	if sid, _ := ev["sessionId"].(string); !isUUIDv4Shape(sid) {
+		t.Errorf("sessionId=%q 应为 UUID v4", sid)
+	}
+	// 事件体 reportDelay 恒 0（2000 是批量调度间隔，不是字段值）。
+	if v, _ := ev["reportDelay"].(float64); v != 0 {
+		t.Errorf("reportDelay=%v want 0", ev["reportDelay"])
+	}
+	// 机器字段取真机缺省（darwin/arm64/23.6.0/Apple M2/8/16），不再是 win32/x64。
+	for k, want := range map[string]any{
+		"os": "darwin", "arch": "arm64", "osVersion": "23.6.0", "cpuModel": "Apple M2",
+	} {
+		if ev[k] != want {
+			t.Errorf("%s=%v want %v", k, ev[k], want)
+		}
+	}
+	if ev["cpuCores"] != float64(8) || ev["memorySize"] != float64(16) {
+		t.Errorf("cpuCores/memorySize=%v/%v want 8/16", ev["cpuCores"], ev["memorySize"])
+	}
+	// commit/releaseDate 取当前 product 配置缺省（5.9.2 包内 product.json）。
+	if ev["commit"] != defaultDesktopCommit {
+		t.Errorf("commit=%v want %v", ev["commit"], defaultDesktopCommit)
+	}
+	if ev["releaseDate"] != float64(defaultDesktopReleaseDate) {
+		t.Errorf("releaseDate=%v want %d", ev["releaseDate"], defaultDesktopReleaseDate)
+	}
+	// qimei36 缺省不发（伪造值比缺字段更可疑）。
+	if q, has := ev["qimei36"]; has {
+		t.Errorf("qimei36 不应出现在缺省指纹里：%v", q)
+	}
+}
+
+// TestDesktopFingerprintConfigOverrides 机器字段可由 config 覆盖；qimei36 配了才发。
+// 真实值来自宿主进程（OSEventProcessor），容器内必须能整体改写。
+func TestDesktopFingerprintConfigOverrides(t *testing.T) {
+	c := &Client{
+		DesktopOS: "win32", DesktopArch: "x64", DesktopOSVersion: "10.0.26220",
+		DesktopCPUModel: "Intel(R) Core(TM) i9-14900K", DesktopCPUCores: 20, DesktopMemorySize: 24,
+		DesktopCommit: "deadbeef", DesktopReleaseDate: 123, DesktopTimezone: "Europe/Berlin",
+		Qimei36: "aac15cdd91e423abc0dddd47200013a17707",
+	}
+	fp := c.desktopFingerprint(&auth.Auth{UID: "u1", Nickname: "n"}, "5.9.2")
+	for k, want := range map[string]any{
+		"os": "win32", "arch": "x64", "osVersion": "10.0.26220",
+		"cpuModel": "Intel(R) Core(TM) i9-14900K", "cpuCores": 20, "memorySize": 24,
+		"commit": "deadbeef", "releaseDate": int64(123), "timezone": "Europe/Berlin",
+		"qimei36": "aac15cdd91e423abc0dddd47200013a17707",
+	} {
+		if fp[k] != want {
+			t.Errorf("%s=%v want %v", k, fp[k], want)
+		}
+	}
+	// 同一账号 machineId 稳定（固定设备），sessionId 与账号无关（进程级）。
+	fp2 := c.desktopFingerprint(&auth.Auth{UID: "u1"}, "5.9.2")
+	if fp["machineId"] != fp2["machineId"] {
+		t.Error("同一 uid 的 machineId 应稳定")
+	}
+	if fp["sessionId"] != fp2["sessionId"] {
+		t.Error("sessionId 应为进程级常量")
+	}
+	fpOther := c.desktopFingerprint(&auth.Auth{UID: "u2"}, "5.9.2")
+	if fpOther["machineId"] == fp["machineId"] {
+		t.Error("不同 uid 的 machineId 应不同")
 	}
 }
 

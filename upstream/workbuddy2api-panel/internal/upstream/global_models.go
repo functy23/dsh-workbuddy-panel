@@ -421,6 +421,8 @@ func (c *Client) globalModelsOnce(a *auth.Auth, path string) ([]string, []ModelI
 		return nil, nil, err
 	}
 	c.CommonHeaders(req, a) // 共享官方头族，与 FetchModels 同款
+	// /console/ 目录端点补浏览器形状两头（与 FetchModels 一致；/v2 目录不补）。
+	applyModelCatalogHeaders(req, path)
 	// 401 自动刷新重放（见 auth_replay.go）：模型目录探测同样会撞 token 吊销。
 	resp, err := c.sendWithAuthReplay(c.HTTP, req)
 	if err != nil {

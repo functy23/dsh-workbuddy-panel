@@ -2,7 +2,7 @@
  * The plugin's live state: the supervised gateway, the merged catalog, and the
  * write actions the browser surfaces perform.
  *
- * One service owns every mutable fact — the supervisor's process state, the
+ * One service owns every mutable fact — the host row's process snapshot, the
  * panel's answer, the local override document — so the status document, the
  * provider's catalog, and the panel sync can never disagree. Surfaces are pure
  * projections of status().
@@ -21,7 +21,7 @@
  * @module dsh-workbuddy2api-gateway/service
  */
 
-import { catalogCachePath, gatewayUsagePath } from './paths.ts'
+import { catalogCachePath, gatewayConfigPath, gatewayUsagePath, gatewayWorkdir } from './paths.ts'
 import { readUsage } from './usage.ts'
 import type { UsageSummary } from './usage.ts'
 import { readStoreDocument, writeStoreDocument } from './store-file.ts'
@@ -31,7 +31,8 @@ import type { ModelOverridesStore } from './overrides-store.ts'
 import type { ConnectionSettings, ConnectionStore } from './settings-store.ts'
 import { PanelClient, PanelError, safeMessage } from './panel-client.ts'
 import type { AccountOp, BulkOp, PanelAccount, PanelModel, PanelOverview } from './panel-client.ts'
-import type { PanelSupervisor, SupervisorStatus } from './supervisor.ts'
+import type { GatewayHost, GatewayState, GatewayStatus, KernelCheckCadence, KernelUpdateStatus, ServerStatus } from './gateway-contract.ts'
+import { serverManifest } from './server-release.ts'
 
 /** Format version of the cached catalog document. */
 const CACHE_VERSION = 2
@@ -102,6 +103,14 @@ export interface WebLogin {
   startedAt: string
 }
 
+/** The last completed account add, so the dialog can close on success. */
+export interface WebLoginDone {
+  at: string
+  realm: string
+  uid?: string
+  nickname?: string
+}
+
 /** What one poll changed about the catalog. */
 export interface WebSync {
   lastSyncedAt?: string
@@ -133,8 +142,12 @@ export interface WebStatus {
     syncHiddenToPanel: boolean
     autoRegister: boolean
   }
-  /** The supervised process. */
-  gateway: SupervisorStatus
+  /** The host-owned process. */
+  gateway: GatewayStatus
+  /** The separately downloaded server artifact. */
+  server: ServerStatus
+  /** Kernel discovery: cadence, last check, and the version the channel offers. */
+  kernel: KernelUpdateStatus
   panel: {
     connected: boolean
     version?: string
@@ -163,6 +176,7 @@ export interface WebStatus {
   updatedAt?: string
   error?: string
   login?: WebLogin
+  loginDone?: WebLoginDone
 }
 
 /** Whether the browser half ever reached this host process. */
@@ -195,7 +209,8 @@ export interface WorkBuddy2ApiServiceOptions {
   connection: ConnectionStore
   overrides: ModelOverridesStore
   client: PanelClient
-  supervisor: PanelSupervisor
+  /** Resolve the host row lazily: either row may load first. */
+  host: () => GatewayHost | undefined
   cachePath?: string
   warn?: (message: string, error?: unknown) => void
   onChange?: () => void
@@ -281,6 +296,79 @@ interface GatewaySnapshot {
   at?: string
 }
 
+/** Whether a process action reached a usable gateway. */
+function gatewayActionOk(state: GatewayState): boolean {
+  return state === 'running' || state === 'starting' || state === 'external'
+}
+
+/** A status document that never lies about a missing host row. */
+function fallbackGatewayStatus(port: number): GatewayStatus {
+  return {
+    state: 'host-unavailable',
+    managed: false,
+    host: 'unavailable',
+    configPath: gatewayConfigPath(),
+    workdir: gatewayWorkdir(),
+    port,
+    restarts: 0,
+    autoStart: false,
+    log: [],
+    error: 'the host gateway row is not loaded',
+  }
+}
+
+/** The port the panel URL names, or the gateway default. */
+function portFromPanelUrl(url: string): number {
+  try {
+    const parsed = new URL(url)
+    const port = Number(parsed.port)
+    return Number.isInteger(port) && port > 0 ? port : 7863
+  } catch {
+    return 7863
+  }
+}
+
+/** The pinned server shape when the host row is missing. */
+/** Kernel state before the host row is loaded. */
+function fallbackKernelUpdate(): KernelUpdateStatus {
+  return { cadence: 'hourly', available: false, installing: false, error: 'the host gateway row is not loaded' }
+}
+
+function fallbackServerStatus(): ServerStatus {
+  try {
+    const manifest = serverManifest()
+    return {
+      platform: process.platform,
+      arch: process.arch,
+      supported: false,
+      version: manifest.version,
+      apiVersion: manifest.apiVersion,
+      installed: false,
+      sha256: '',
+      size: 0,
+      downloadSize: 0,
+      releaseUrl: '',
+      download: { state: 'idle', received: 0, total: 0 },
+      error: 'the host gateway row is not loaded',
+    }
+  } catch {
+    return {
+      platform: process.platform,
+      arch: process.arch,
+      supported: false,
+      version: 'unknown',
+      apiVersion: 0,
+      installed: false,
+      sha256: '',
+      size: 0,
+      downloadSize: 0,
+      releaseUrl: '',
+      download: { state: 'idle', received: 0, total: 0 },
+      error: 'the host gateway row is not loaded',
+    }
+  }
+}
+
 /**
  * The plugin's one mutable state holder.
  *
@@ -293,10 +381,13 @@ export class WorkBuddy2ApiService {
   private catalog: readonly CatalogModel[] = []
   private sync: WebSync
   private login?: WebLogin
+  private loginDone?: WebLoginDone
   private loginStartedAt?: number
   private clientProbe: WebClientProbe = {}
   private usageCache?: { at: number, summary: UsageSummary }
   private inFlight?: Promise<void>
+  /** Whether the last gateway read actually reached it. */
+  private lastReadOk = false
   private emptyModelReads = 0
   /** Consecutive reads that omitted a realm, keyed by realm. */
   private realmGaps = new Map<ModelRegion, number>()
@@ -362,9 +453,9 @@ export class WorkBuddy2ApiService {
     return this.catalog
   }
 
-  /** The supervisor, for the routes that drive the process. */
-  get supervisor(): PanelSupervisor {
-    return this.options.supervisor
+  /** The host row, resolved at call time so a reload cannot pin a dead one. */
+  private host(): GatewayHost | undefined {
+    return this.options.host()
   }
 
   /** Read the gateway once and fold the answer into the snapshot. */
@@ -380,6 +471,7 @@ export class WorkBuddy2ApiService {
   private async read(): Promise<void> {
     const connection = this.options.connection.current()
     if (!connection.panelUrl) {
+      this.lastReadOk = false
       this.snapshot = { ...this.snapshot, error: 'no gateway address configured' }
       return
     }
@@ -388,6 +480,7 @@ export class WorkBuddy2ApiService {
       this.options.client.models(),
     ])
     if (overview.status === 'fulfilled' && models.status === 'fulfilled') {
+      this.lastReadOk = true
       this.snapshot = {
         overview: overview.value,
         models: models.value,
@@ -396,6 +489,7 @@ export class WorkBuddy2ApiService {
       this.merge(models.value)
       return
     }
+    this.lastReadOk = false
     const failed = overview.status === 'rejected' ? overview : models
     const reason = failed.status === 'rejected' ? safeMessage(failed.reason) : 'gateway read failed'
     this.snapshot = { ...this.snapshot, error: reason }
@@ -517,7 +611,11 @@ export class WorkBuddy2ApiService {
   status(): WebStatus {
     const connection = this.options.connection.current()
     const overview = this.snapshot.overview
-    const gateway = this.options.supervisor.status()
+    const host = this.host()
+    const gateway = host?.status() ?? fallbackGatewayStatus(portFromPanelUrl(connection.panelUrl))
+    const server = host?.serverStatus() ?? fallbackServerStatus()
+    const gatewayReachable = gateway.state === 'running' || gateway.state === 'external'
+    const connected = gatewayReachable && this.lastReadOk
     const enabledModels = this.catalog.filter(model => model.enabled).length
     const counts = {
       total: overview?.total ?? 0,
@@ -545,14 +643,17 @@ export class WorkBuddy2ApiService {
         autoRegister: this.sync.autoRegister,
       },
       gateway,
+      server,
+      // Optional call: a host row from an older generation may not offer this.
+      kernel: host?.kernelUpdate?.() ?? fallbackKernelUpdate(),
       panel: {
-        // "Connected" is the panel's own answer, not the process state: a gateway
-        // that runs but refuses the key is up and unusable, and the page has to
-        // say which of the two it is.
-        connected: overview !== undefined,
-        ...overview?.version === undefined ? {} : { version: overview.version },
-        ...overview?.uptimeSec === undefined ? {} : { uptimeSec: overview.uptimeSec },
-        ...overview?.redisMode === undefined ? {} : { redisMode: overview.redisMode },
+        // "Connected" needs both halves: the process is up and the last read
+        // actually reached it. A cached overview from before a stop must not
+        // keep the page saying "connected".
+        connected,
+        ...connected && overview?.version !== undefined ? { version: overview.version } : {},
+        ...connected && overview?.uptimeSec !== undefined ? { uptimeSec: overview.uptimeSec } : {},
+        ...connected && overview?.redisMode !== undefined ? { redisMode: overview.redisMode } : {},
         authRequired: overview?.authRequired ?? connection.apiKey !== '',
         ...this.snapshot.error === undefined ? {} : { error: this.snapshot.error },
       },
@@ -565,6 +666,7 @@ export class WorkBuddy2ApiService {
       ...this.snapshot.at === undefined ? {} : { updatedAt: this.snapshot.at },
       ...this.snapshot.error === undefined ? {} : { error: this.snapshot.error },
       ...this.login === undefined ? {} : { login: this.login },
+      ...this.loginDone === undefined ? {} : { loginDone: this.loginDone },
     }
   }
 
@@ -591,14 +693,14 @@ export class WorkBuddy2ApiService {
 
   /** Save the connection document (address, key, cadence, sync policy). */
   async saveConnection(patch: Partial<ConnectionSettings>): Promise<ActionOutcome> {
+    const host = this.host()
     const rotated = patch.apiKey !== undefined && patch.apiKey !== ''
-      && patch.apiKey !== this.options.supervisor.apiKeyFromConfig()
+      && patch.apiKey !== host?.apiKeyFromConfig()
     this.options.connection.patch(patch)
-    this.options.supervisor.invalidateBinary()
     // One key means the gateway's own document: a key living only here would leave
-    // the gateway refusing its supervisor and the web panel locked out.
-    const written = rotated && this.options.supervisor.updateConfigApiKey(patch.apiKey ?? '')
-    if (written) await this.options.supervisor.restart()
+    // the gateway refusing its own host row and the web panel locked out.
+    const written = rotated ? host?.updateConfigApiKey(patch.apiKey ?? '') ?? false : false
+    if (written) await host?.restart()
     this.options.onChange?.()
     return this.settled({
       ok: !rotated || written,
@@ -608,20 +710,24 @@ export class WorkBuddy2ApiService {
     })
   }
 
-  /** Start the supervised gateway. */
+  /** Start the host-owned gateway. */
   async startGateway(): Promise<ActionOutcome> {
-    const status = await this.options.supervisor.start()
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const status = await host.start()
     await this.refresh().catch(() => {})
     return {
-      ok: status.state !== 'failed',
+      ok: gatewayActionOk(status.state),
       ...status.error === undefined ? {} : { message: status.error },
       status: this.status(),
     }
   }
 
-  /** Stop the supervised gateway (refused for one we did not spawn). */
+  /** Stop the host-owned gateway (refused for one the row did not start). */
   async stopGateway(): Promise<ActionOutcome> {
-    const status = await this.options.supervisor.stop()
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const status = await host.stop()
     await this.refresh().catch(() => {})
     return {
       ok: status.error === undefined,
@@ -630,24 +736,97 @@ export class WorkBuddy2ApiService {
     }
   }
 
-  /** Restart the supervised gateway. */
+  /** Restart the host-owned gateway. */
   async restartGateway(): Promise<ActionOutcome> {
-    const status = await this.options.supervisor.restart()
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const status = await host.restart()
     await this.refresh().catch(() => {})
     return {
-      ok: status.state !== 'failed',
+      ok: gatewayActionOk(status.state),
       ...status.error === undefined ? {} : { message: status.error },
       status: this.status(),
     }
+  }
+
+  /** Start the pinned server download; progress is read from status(). */
+  async downloadServer(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const server = await host.downloadServer()
+    const message = server.download.error ?? server.error
+    return {
+      ok: server.download.state !== 'failed' && message === undefined,
+      ...message === undefined ? {} : { message },
+      status: this.status(),
+    }
+  }
+
+  /** Abort the in-flight server download. */
+  async cancelServerDownload(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    host.cancelDownload()
+    return { ok: true, message: 'server download cancelled', status: this.status() }
+  }
+
+  /** Re-hash the installed server binary. */
+  async verifyServer(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const server = await host.verifyServer()
+    return {
+      ok: server.error === undefined,
+      ...server.error === undefined ? {} : { message: server.error },
+      status: this.status(),
+    }
+  }
+
+  /** Ask the release channel for a newer kernel. */
+  async checkKernelUpdate(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const kernel = await host.checkKernelUpdate()
+    if (kernel.error !== undefined) return { ok: false, message: kernel.error, status: this.status() }
+    return {
+      ok: true,
+      message: kernel.available
+        ? 'kernel ' + String(kernel.latestVersion ?? '') + ' is available'
+        : 'kernel is up to date',
+      status: this.status(),
+    }
+  }
+
+  /** Install the version the last check discovered. */
+  async installKernelUpdate(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const server = await host.installKernelUpdate()
+    const message = server.download.error ?? server.error
+    return {
+      ok: server.installed && message === undefined,
+      ...message === undefined ? {} : { message },
+      status: this.status(),
+    }
+  }
+
+  /** Persist the automatic check cadence. */
+  setKernelCadence(cadence: KernelCheckCadence): ActionOutcome {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    host.setKernelCadence(cadence)
+    return { ok: true, message: 'kernel update cadence saved', status: this.status() }
   }
 
   /** Probe the gateway without changing the process. */
   async testConnection(): Promise<ActionOutcome> {
     try {
       const overview = await this.options.client.overview()
+      this.lastReadOk = true
       this.snapshot = { ...this.snapshot, overview, at: new Date().toISOString() }
       return this.settled({ ok: true, message: 'gateway answered with ' + String(overview.total) + ' accounts' })
     } catch (error: unknown) {
+      this.lastReadOk = false
       const message = error instanceof PanelError ? error.message : safeMessage(error)
       await this.refresh().catch(() => {})
       return { ok: false, message, status: this.status() }
@@ -710,6 +889,7 @@ export class WorkBuddy2ApiService {
   async loginStart(realm: 'cn' | 'global'): Promise<ActionOutcome> {
     try {
       const started = await this.options.client.loginStart(realm)
+      this.loginDone = undefined
       this.login = {
         state: started.state,
         url: started.url,
@@ -725,11 +905,26 @@ export class WorkBuddy2ApiService {
 
   /** Poll one in-flight add; a finished add becomes a real account. */
   async loginPoll(state: string): Promise<ActionOutcome> {
+    // A poll from a challenge the dialog already replaced must not finish the
+    // new one. The gateway keys challenges by state; the service owns the same
+    // identity here.
+    const current = this.login
+    if (current === undefined || current.state !== state) {
+      return { ok: true, status: this.status() }
+    }
     try {
       const polled = await this.options.client.loginPoll(state)
       // A pending add keeps the waiting state: the page renders it from `login`,
       // not from a missing account.
       if (!polled.done) return { ok: true, status: this.status() }
+      // The user may have switched realms while the poll was in flight.
+      if (this.login?.state !== state) return { ok: true, status: this.status() }
+      this.loginDone = {
+        at: new Date().toISOString(),
+        realm: current.realm,
+        ...polled.uid === undefined ? {} : { uid: polled.uid },
+        ...polled.nickname === undefined ? {} : { nickname: polled.nickname },
+      }
       this.login = undefined
       this.loginStartedAt = undefined
       await this.refresh().catch(() => {})
@@ -746,6 +941,7 @@ export class WorkBuddy2ApiService {
   /** Forget the in-flight add. */
   async loginCancel(): Promise<ActionOutcome> {
     this.login = undefined
+    this.loginDone = undefined
     this.loginStartedAt = undefined
     return { ok: true, status: this.status() }
   }
@@ -755,6 +951,7 @@ export class WorkBuddy2ApiService {
     if (this.login === undefined || this.loginStartedAt === undefined) return false
     if (now - this.loginStartedAt < 10 * 60_000) return false
     this.login = undefined
+    this.loginDone = undefined
     this.loginStartedAt = undefined
     return true
   }

@@ -54,6 +54,12 @@ export type GatewayAction =
   | { action: 'gateway-start' }
   | { action: 'gateway-stop' }
   | { action: 'gateway-restart' }
+  | { action: 'server-download' }
+  | { action: 'server-cancel' }
+  | { action: 'server-verify' }
+  | { action: 'kernel-check' }
+  | { action: 'kernel-install' }
+  | { action: 'kernel-cadence', cadence: 'hourly' | 'never' }
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null, efforts?: readonly ThinkingLevel[] }
@@ -128,6 +134,9 @@ export function parseAction(text: string): GatewayAction | undefined {
     case 'gateway-start': return { action: 'gateway-start' }
     case 'gateway-stop': return { action: 'gateway-stop' }
     case 'gateway-restart': return { action: 'gateway-restart' }
+    case 'server-download': return { action: 'server-download' }
+    case 'server-cancel': return { action: 'server-cancel' }
+    case 'server-verify': return { action: 'server-verify' }
     case 'connection': {
       const panelUrl = strField(body['panelUrl'])
       const apiKey = strField(body['apiKey'])
@@ -163,6 +172,12 @@ export function parseAction(text: string): GatewayAction | undefined {
       if (typeof body['enabled'] !== 'boolean') return undefined
       const region = body['region'] === 'global' ? 'global' : body['region'] === 'cn' ? 'cn' : undefined
       return { action: 'models-all', enabled: body['enabled'], ...region === undefined ? {} : { region } }
+    }
+    case 'kernel-check': return { action: 'kernel-check' }
+    case 'kernel-install': return { action: 'kernel-install' }
+    case 'kernel-cadence': {
+      const cadence = body['cadence']
+      return cadence === 'hourly' || cadence === 'never' ? { action: 'kernel-cadence', cadence } : undefined
     }
     case 'sync-hidden': return { action: 'sync-hidden' }
     case 'login-start': {
@@ -266,6 +281,18 @@ export async function runAction(service: WorkBuddy2ApiService, action: GatewayAc
       return service.stopGateway()
     case 'gateway-restart':
       return service.restartGateway()
+    case 'server-download':
+      return service.downloadServer()
+    case 'server-cancel':
+      return service.cancelServerDownload()
+    case 'server-verify':
+      return service.verifyServer()
+    case 'kernel-check':
+      return service.checkKernelUpdate()
+    case 'kernel-install':
+      return service.installKernelUpdate()
+    case 'kernel-cadence':
+      return Promise.resolve(service.setKernelCadence(action.cadence))
     case 'connection':
       return service.saveConnection({
         ...action.panelUrl === undefined ? {} : { panelUrl: action.panelUrl },

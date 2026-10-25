@@ -164,6 +164,17 @@ func main() {
 	up.DeviceToken = cfg.Upstream.DeviceToken
 	up.DeviceTokenFile = cfg.Upstream.DeviceTokenFile
 	up.PassthroughIP = cfg.Upstream.PassthroughIP
+	// 桌面事件指纹的机器字段（空 = 内置真机缺省；见 upstream/desktop.go）。
+	up.DesktopOS = cfg.Upstream.DesktopOS
+	up.DesktopArch = cfg.Upstream.DesktopArch
+	up.DesktopOSVersion = cfg.Upstream.DesktopOSVersion
+	up.DesktopCPUModel = cfg.Upstream.DesktopCPUModel
+	up.DesktopCPUCores = cfg.Upstream.DesktopCPUCores
+	up.DesktopMemorySize = cfg.Upstream.DesktopMemorySize
+	up.DesktopTimezone = cfg.Upstream.DesktopTimezone
+	up.DesktopCommit = cfg.Upstream.DesktopCommit
+	up.DesktopReleaseDate = cfg.Upstream.DesktopReleaseDate
+	up.Qimei36 = cfg.Upstream.Qimei36
 	// global realm 路由（config global 段）：上游侧开关（第一道闸）+ base 覆盖；
 	// auth 侧开关（auth.SetGlobalEnabled）是第二道闸，两者同 config global.enabled。
 	up.GlobalEnabled = cfg.Global.Enabled
@@ -582,6 +593,14 @@ func restartRequiredFields(c *Config) []string {
 	// 之后不再读取——不在 livecfg 热快照里，也无法热改。此前漏列，导致面板改完
 	// 显示"已保存"却不提示需要重启，用户以为没生效（issue #102 附带发现 2）。
 	out = append(out, "upstream.user_agent")
+	// 桌面事件指纹的机器字段同样在装配期写进 up.*（见 main.go 的 up.DesktopOS = ...），
+	// 请求路径只读不热改；改完必须重启才生效。
+	out = append(out,
+		"upstream.desktop_os", "upstream.desktop_arch", "upstream.desktop_os_version",
+		"upstream.desktop_cpu_model", "upstream.desktop_cpu_cores", "upstream.desktop_memory_size",
+		"upstream.desktop_timezone", "upstream.desktop_commit", "upstream.desktop_release_date",
+		"upstream.qimei36",
+	)
 	// cn.chat_base 同样只在装配期写进 up.ChatBaseCN（请求路径并发读取，不做热改）。
 	out = append(out, "cn.chat_base")
 	if c.Upstash.URL != "" || c.Upstash.Token != "" {

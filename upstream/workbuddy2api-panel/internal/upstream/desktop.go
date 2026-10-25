@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
@@ -39,7 +40,97 @@ import (
 const (
 	desktopReportPath    = "/v2/report"
 	desktopAppearanceSet = "/v2/user-asset/appearance/set"
+
+	// 桌面事件机器指纹缺省值：对齐 2026-10-25 真机活体样本（5.8.3 进程的
+	// /v2/report 事件：os=darwin arch=arm64 osVersion=23.6.0 cpuModel=Apple M2
+	// cpuCores=8 memorySize=16）。旧实现写死 win32/x64/10.0.26220/20/24，
+	// 与任何真机都对不上。宿主不同请用 config upstream.desktop_* 覆盖。
+	defaultDesktopOS         = "darwin"
+	defaultDesktopArch       = "arm64"
+	defaultDesktopOSVersion  = "23.6.0"
+	defaultDesktopCPUModel   = "Apple M2"
+	defaultDesktopCPUCores   = 8
+	defaultDesktopMemorySize = 16
+	defaultDesktopTimezone   = "Asia/Shanghai"
+
+	// releaseDate/commit 是**远端 product 配置**的 date/commit（ProductInfoEventProcessor
+	// 读 productManager.waitConfiguration()），不是 app 版本号，也不是包内常量能长期
+	// 保证的值。缺省取 5.9.2 包内 product.json（2026-10-24T08:47:02.566Z /
+	// 0b5051be70a4899bb5dc6497cd2275e912abe953）；config 可覆盖。
+	defaultDesktopCommit      = "0b5051be70a4899bb5dc6497cd2275e912abe953"
+	defaultDesktopReleaseDate = int64(1792831622566)
 )
+
+// desktopOS 等访问器：config 覆盖优先，空值回落真机缺省。
+func (c *Client) desktopOS() string {
+	if c != nil && c.DesktopOS != "" {
+		return c.DesktopOS
+	}
+	return defaultDesktopOS
+}
+
+func (c *Client) desktopArch() string {
+	if c != nil && c.DesktopArch != "" {
+		return c.DesktopArch
+	}
+	return defaultDesktopArch
+}
+
+func (c *Client) desktopOSVersion() string {
+	if c != nil && c.DesktopOSVersion != "" {
+		return c.DesktopOSVersion
+	}
+	return defaultDesktopOSVersion
+}
+
+func (c *Client) desktopCPUModel() string {
+	if c != nil && c.DesktopCPUModel != "" {
+		return c.DesktopCPUModel
+	}
+	return defaultDesktopCPUModel
+}
+
+func (c *Client) desktopCPUCores() int {
+	if c != nil && c.DesktopCPUCores > 0 {
+		return c.DesktopCPUCores
+	}
+	return defaultDesktopCPUCores
+}
+
+func (c *Client) desktopMemorySize() int {
+	if c != nil && c.DesktopMemorySize > 0 {
+		return c.DesktopMemorySize
+	}
+	return defaultDesktopMemorySize
+}
+
+func (c *Client) desktopTimezone() string {
+	if c != nil && c.DesktopTimezone != "" {
+		return c.DesktopTimezone
+	}
+	return defaultDesktopTimezone
+}
+
+func (c *Client) desktopCommit() string {
+	if c != nil && c.DesktopCommit != "" {
+		return c.DesktopCommit
+	}
+	return defaultDesktopCommit
+}
+
+func (c *Client) desktopReleaseDate() int64 {
+	if c != nil && c.DesktopReleaseDate > 0 {
+		return c.DesktopReleaseDate
+	}
+	return defaultDesktopReleaseDate
+}
+
+func (c *Client) qimei36() string {
+	if c != nil {
+		return strings.TrimSpace(c.Qimei36)
+	}
+	return ""
+}
 
 // electronRendererUA 渲染进程（Web 形态端点）UA：从官方 5.8.3 的 renderer.log 实证
 // `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ... WorkBuddy/5.8.3
@@ -59,44 +150,71 @@ func (c *Client) electronRendererUA(a *auth.Auth) string {
 // desktopBase 桌面端 /v2/report 与 user-asset 走 chatBase（copilot.tencent.com）。
 func (c *Client) desktopBase(a *auth.Auth) string { return c.chatBase(a) }
 
-// deriveID 由 uid 稳定派生一个 36 位 hex 设备标识（machineId/qimei36 复用），
-// 幂等：同一账号每次生成相同值，模拟固定设备。
-func deriveID(a *auth.Auth, salt string) string {
+// deriveUUID 由 uid 稳定派生一个 **UUID 形态**的设备标识（8-4-4-4-12，大写）。
+//
+// 为什么必须是 UUID 形态：官方 machineId 来自 osxUuid() → ioreg IOPlatformUUID，
+// 是带横线的大写 UUID（真机样本 0225D5C1-8FB4-5304-A8B2-E649DA1E6A40）；旧实现给的是
+// 36 位连续 hex，形状与官方完全不同，是一眼可辨的伪造特征。
+// 同一账号幂等：模拟"固定设备"。
+func deriveUUID(a *auth.Auth, salt string) string {
 	sum := sha256.Sum256([]byte(salt + ":" + a.UID))
-	return hex.EncodeToString(sum[:18]) // 36 hex chars
+	h := hex.EncodeToString(sum[:16])
+	return strings.ToUpper(h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32])
 }
+
+// desktopSessionID 进程级 sessionId：官方是"一次 app 运行一个 UUID"（真机样本
+// 7d7dade8-d565-4d34-a3e6-420f3adb721e），旧实现按 uid 稳定派生导致跨重启不变，
+// 本身就是可关联的指纹。这里每次进程启动随机生成一次，进程内所有事件复用。
+var desktopSessionID = newUUIDv4()
 
 // DesktopEvent 桌面端事件：业务字段任意（map），公共指纹由 ReportDesktopEvent 注入。
 type DesktopEvent map[string]any
 
 // desktopFingerprint 公共桌面指纹字段（注入每个事件，覆盖同名业务键）。
-// clientVer 为当前出站客户端版本（跟随 Client.ClientVersion，不再写死 5.5.6）。
-func desktopFingerprint(a *auth.Auth, clientVer string) map[string]any {
+//
+// 字段来源 = 官方 StandardEventService 的处理器链（common3.js + module-base.js）：
+//   - ProductInfoEventProcessor：product/releaseDate/commit（读远端 product 配置）
+//   - OSEventProcessor：os/arch/osVersion/cpuModel/cpuCores/memorySize（读宿主进程）
+//   - WorkbuddyHostIDEInfoEventProcessor / ExtensionInfo：ide*/machineId/sessionId/ext*
+//   - QimeiEventProcessor：qimei36（原生 QIMEI SDK）
+//   - TimezoneEventProcessor：timezone（Intl 解析）
+//
+// 另：事件体 reportDelay 恒 0（2000 是批量调度间隔，不是字段值）。
+//
+// clientVer 为当前出站客户端版本（跟随 Client.ClientVersion）。
+func (c *Client) desktopFingerprint(a *auth.Auth, clientVer string) map[string]any {
 	now := time.Now().UnixMilli()
-	return map[string]any{
-		"timezone":     "Asia/Shanghai",
-		"reportDelay":  2000,
+	fp := map[string]any{
+		"timezone":     c.desktopTimezone(),
+		"reportDelay":  0,
 		"userId":       a.UID,
 		"username":     a.Nickname,
 		"userNickname": a.Nickname,
 		"product":      deploymentTypeSaaS,
-		"releaseDate":  int64(1789036585355),
-		"commit":       "5f9692923c93033111c51ad7b003eb80204a9b75",
+		"releaseDate":  c.desktopReleaseDate(),
+		"commit":       c.desktopCommit(),
 		"ideName":      ideName,
 		"ideType":      ideName,
 		"ideVersion":   clientVer,
-		"machineId":    deriveID(a, "machine"),
-		"sessionId":    deriveID(a, "session"),
+		"machineId":    deriveUUID(a, "machine"),
+		"sessionId":    desktopSessionID,
 		"extName":      "workbuddy-desktop",
 		"extVersion":   clientVer,
-		"os":           "win32",
-		"arch":         "x64",
-		"osVersion":    "10.0.26220",
-		"cpuCores":     20,
-		"memorySize":   24,
+		"os":           c.desktopOS(),
+		"arch":         c.desktopArch(),
+		"osVersion":    c.desktopOSVersion(),
+		"cpuModel":     c.desktopCPUModel(),
+		"cpuCores":     c.desktopCPUCores(),
+		"memorySize":   c.desktopMemorySize(),
 		"timestamp":    now,
 		"presentAt":    now,
 	}
+	// qimei36 只有真机 QIMEI SDK 能生成（签名载荷）；没有就**不发**该键——
+	// 伪造值比缺字段更容易被识别。config upstream.qimei36 可注入真实值。
+	if q := c.qimei36(); q != "" {
+		fp["qimei36"] = q
+	}
+	return fp
 }
 
 // ReportDesktopEvent 以桌面客户端指纹向 copilot.tencent.com/v2/report 批量上报事件。
@@ -106,7 +224,7 @@ func (c *Client) ReportDesktopEvent(a *auth.Auth, events ...DesktopEvent) error 
 	if len(events) == 0 {
 		return fmt.Errorf("desktop report: no events")
 	}
-	fp := desktopFingerprint(a, c.clientVersion())
+	fp := c.desktopFingerprint(a, c.clientVersion())
 	arr := make([]map[string]any, 0, len(events))
 	for _, ev := range events {
 		m := map[string]any{}
@@ -126,8 +244,8 @@ func (c *Client) ReportDesktopEvent(a *auth.Auth, events ...DesktopEvent) error 
 	if err != nil {
 		return err
 	}
-	// 官方主进程 axios 全套头族（身份/归属/链路）；X-Request-ID 由链路族统一生成，
-	// 不再自造 deriveID+时间戳（那种形态与官方 32 hex 不符）。
+	// 官方主进程 axios 全套头族（身份/归属/链路）；X-Request-ID 由链路族统一生成
+	// （32 hex，与官方同形）。
 	c.CommonHeaders(req, a)
 	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	_, err = c.doJSON(req)
@@ -270,11 +388,15 @@ func (c *Client) ReportWebEvent(a *auth.Auth, eventCode, pageURL, elementID, ele
 	// userAgent 字段就是 navigator.userAgent（Electron 形态），两处不一致是
 	// 一眼可辨的伪造特征。
 	ua := c.electronRendererUA(a)
+	// 渲染进程 reporter（account.js 的 CloudProductMetricsReporter）只写：
+	//   userAgent = navigator.userAgent、os = navigator.platform、timezone、clientIp
+	// 不写 arch/osVersion（那是主进程 OSEventProcessor 的字段）。故这里 os 取
+	// navigator.platform 的取值（macOS = "MacIntel"），并且不带 arch/osVersion。
 	ev := map[string]any{
 		"eventCode": eventCode, "timestamp": time.Now().UnixMilli(), "reportDelay": 0,
 		"pageURL": pageURL, "elementId": elementID, "elementName": elementName,
-		"os": "Mac OS X", "arch": "arm64", "osVersion": "10.15.7", "userAgent": ua,
-		"machineId": deriveID(a, "webmachine"), "userId": a.UID,
+		"os": "MacIntel", "userAgent": ua,
+		"machineId": deriveUUID(a, "machine"), "userId": a.UID,
 		"userNickname": a.Nickname, "enterpriseId": a.EnterpriseID,
 	}
 	raw, err := json.Marshal([]map[string]any{ev})

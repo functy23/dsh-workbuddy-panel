@@ -153,10 +153,10 @@ type Config struct {
 		// 默认值已对齐官方 WorkBuddy 桌面形态（三段式），用户仍可配完全自定义值改写。
 		UserAgent string `json:"user_agent"`
 		// ClientVersion WorkBuddy 客户端版本段（出站 UA 的 `WorkBuddy/<ver>`、
-		// X-IDE-Version 与事件指纹 ideVersion）。空 = 内置默认（官方 5.8.3 分发包）。
+		// X-IDE-Version 与事件指纹 ideVersion）。空 = 内置默认（官方 5.9.2 分发包）。
 		// 上游升级后此处可热配（需重启，见 restartRequiredFields）。
 		ClientVersion string `json:"client_version"`
-		// CliVersion 出站 UA 中 `CLI/<ver>` 段的版本。空 = 内置默认（官方内置 CLI 2.161.0）。
+		// CliVersion 出站 UA 中 `CLI/<ver>` 段的版本。空 = 内置默认（官方内置 CLI 2.165.0）。
 		CliVersion string `json:"cli_version"`
 		// ClientName X-IDE-Name / X-IDE-Type 取值（默认 "WorkBuddy"）。
 		// 显式配 "SaaS" 走旧行为逃生门：只发 X-Product=SaaS、不发 X-IDE-*/X-Agent-*，
@@ -178,6 +178,25 @@ type Config struct {
 		DeviceTokenFile string `json:"device_token_file"`
 		// PassthroughIP 是否透传客户端 IP 给上游（默认 false，反代安全边界）。
 		PassthroughIP bool `json:"passthrough_ip"`
+
+		// 以下为桌面事件（POST /v2/report）的机器指纹。真实值取自宿主进程
+		// （OSEventProcessor），容器内无法得知，故可配；空 = 真机缺省样本
+		// （darwin/arm64/23.6.0/Apple M2/8/16，来自 2026-10-25 活体抓样）。
+		DesktopOS         string `json:"desktop_os"`
+		DesktopArch       string `json:"desktop_arch"`
+		DesktopOSVersion  string `json:"desktop_os_version"`
+		DesktopCPUModel   string `json:"desktop_cpu_model"`
+		DesktopCPUCores   int    `json:"desktop_cpu_cores"`
+		DesktopMemorySize int    `json:"desktop_memory_size"`
+		// DesktopTimezone 事件 timezone（官方 Intl 解析）；空 = Asia/Shanghai。
+		DesktopTimezone string `json:"desktop_timezone"`
+		// DesktopCommit / DesktopReleaseDate 事件 commit/releaseDate。注意这两个是
+		// **远端 product 配置**的 date/commit（会随服务端配置更新），不是 app 版本；
+		// 空/0 = 5.9.2 包内 product.json 值（0b5051be… / 1792831622566）。
+		DesktopCommit      string `json:"desktop_commit"`
+		DesktopReleaseDate int64  `json:"desktop_release_date"`
+		// Qimei36 真机 QIMEI 标识。空 = 不发该字段（只有原生 QIMEI SDK 能产出可验签值）。
+		Qimei36 string `json:"qimei36"`
 	} `json:"upstream"`
 
 	Features struct {

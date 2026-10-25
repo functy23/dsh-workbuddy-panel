@@ -268,11 +268,12 @@ export const PAGE_CSS = `
 /* ------------------------------------------------- Claude-style surfaces
    The overview widget, its heat map, and the card treatment the account and
    model sections share: soft fills, no hard outlines, figures that lead. */
-/* Segmented control: the track is #ffffff24 in dark, a lifted 7px-radius chip in
-   light, 14px/500 labels at 3px 12px. Copied from dsh-claude-style's
-   .dsh-claude-segments / .dsh-claude-segment pair. */
-.cs-seg{flex:none;align-self:flex-start;align-items:center;gap:2px;padding:2px;border-radius:7px;background:var(--dsw-specific-selector,#ffffff14);display:inline-flex;position:relative}
-.cs-seg::before{content:"";position:absolute;top:2px;left:2px;height:calc(100% - 4px);width:calc((100% - 4px - 2px * (var(--cs-seg-count,2) - 1)) / var(--cs-seg-count,2));border-radius:7px;background:#ffffff24;box-shadow:0 1px 2px #14141314;transform:translateX(calc(var(--cs-seg-index,0) * (100% + 2px)));transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+/* Segmented control: the track is the theme's chip surface, the active pill is
+   the theme's overlay surface with a soft shadow. Copied from dsh-claude-style's
+   .dsh-claude-segments / .dsh-claude-segment pair; the fallbacks keep the track
+   visible when the theme is not installed. */
+.cs-seg{flex:none;align-self:flex-start;align-items:center;gap:2px;padding:2px;border-radius:7px;background:var(--dsh-claude-chip,var(--dsw-alias-bg-layer-2,#ffffff14));display:inline-flex;position:relative}
+.cs-seg::before{content:"";position:absolute;top:2px;left:2px;height:calc(100% - 4px);width:calc((100% - 4px - 2px * (var(--cs-seg-count,2) - 1)) / var(--cs-seg-count,2));border-radius:7px;background:var(--dsw-alias-bg-overlay,#ffffff24);box-shadow:0 1px 2px #14141314;transform:translateX(calc(var(--cs-seg-index,0) * (100% + 2px)));transition:transform .18s cubic-bezier(.2,.8,.2,1)}
 .cs-segFull{display:flex;width:100%}
 .cs-segDisabled{opacity:.55;pointer-events:none}
 .cs-segItem{appearance:none;margin:0;border:0;cursor:pointer;position:relative;z-index:1;flex:1 1 0;white-space:nowrap;text-align:center;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:14px;font-weight:500;line-height:18px;padding:3px 12px;border-radius:7px;transition:background-color .16s ease,color .16s ease}
@@ -287,6 +288,7 @@ export const PAGE_CSS = `
 .cs-stat{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:12px;background:var(--dsw-alias-interactive-bg-hover)}
 .cs-statLabel{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
 .cs-statValue{font-size:20px;line-height:1.25;font-weight:600;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs-statValueSmall{font-size:14px;line-height:1.35;font-weight:600;white-space:normal;overflow:visible;text-overflow:clip}
 /* Heat map: one 7-row column-flow grid, 1fr columns, 3px gaps, square cells.
    Copied from dsh-claude-style's .dsh-claude-home-heat / -heat-cell. */
 .cs-heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);grid-auto-columns:1fr;gap:2px;align-content:start;--cs-heat-ink:var(--dsw-alias-brand-primary,#3b6ecf)}
