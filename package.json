@@ -28,7 +28,7 @@
     "server:build": "node scripts/build-server-release.mjs",
     "server:manifest": "node scripts/write-server-manifest.mjs",
     "server:install-local": "node scripts/install-local-server.mjs",
-    "release:npm": "npm publish --access public"
+    "release:npm": "npm publish --access public --auth-type=web"
   },
   "exports": {
     ".": {

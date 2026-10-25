@@ -73,7 +73,28 @@
     git tag v0.5.0 && git push --tags
     gh release create v0.5.0 --title v0.5.0 --notes "..."
 
+    # 3. 发 npm —— 走通行密钥（passkey），不是 6 位 OTP
+    pnpm run release:npm        # = npm publish --access public --auth-type=web
+
 忘了传 `dist/server.json` 时，老面板仍能按包内 pin 安装，但"检查更新"会报
 `release … has no server.json asset`；补传用 `gh release upload server-v<ver> dist/server.json`。
+
+### npm 发布的三条硬约束（踩过）
+
+1. **账号开的是通行密钥 2FA，没有 6 位码**。必须 `--auth-type=web`：命令会打印
+   `https://www.npmjs.com/auth/cli/<uuid>`，回车打开浏览器，通行密钥确认后自动落库。
+   不要试 `--otp=123456`，那条路不存在。
+2. **必须有 TTY**。无 TTY 时 npm 直接 `EOTP`，加了 `--auth-type=web` 也一样。真实终端跑，
+   或用 `script -q /dev/null npm publish --access public --auth-type=web` 造一个 pty，
+   再补一个回车（`(sleep 3; printf '\n'; sleep 300) | script -q /dev/null npm publish …`）。
+3. **发布是"先暂存、后认证"**。重试时撞到
+   `E409 Cannot publish over previously staged version`，说明上一次的暂存还在 registry：
+   用 `npm stage list` 看、`npm stage approve <stage-id>` 批准、`npm stage reject <stage-id>` 丢弃，
+   **不要靠改版本号绕过**（tag 与 npm 版本会对不上）。
+
+发完核对（版本、latest、tarball 内容）：
+
+    npm view dsh-workbuddy-panel version dist-tags
+    curl -sL https://registry.npmjs.org/dsh-workbuddy-panel/-/dsh-workbuddy-panel-<ver>.tgz | tar -tzf - | head
 
 版本号写在 `package.json`；`tsdown` 通过 `define` 把它注入 `src/version.ts`，UI 上的版本徽章读的是同一个值。服务端版本写在 `server.json`，由 host gateway row 读取。
