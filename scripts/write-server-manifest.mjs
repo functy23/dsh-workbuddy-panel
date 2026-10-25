@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
 
-const version = process.argv[2] ?? '1.13.0-panel'
+const version = process.argv[2] ?? '1.14.0-panel'
 const binary = new URL('../bin/workbuddy2api', import.meta.url)
 if (!existsSync(binary)) {
   console.error('missing bin/workbuddy2api; build the gateway first')

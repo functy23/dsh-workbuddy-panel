@@ -24,8 +24,8 @@ func (t uaCaptureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 //
 // 为什么统一：官方客户端只有一个 UA（主进程 axios 与 CLI 共用同一 fetch 层），
 // 分路径发不同 UA 会让上游看到"同账号同 IP 同时存在两种客户端"的关联特征。
-// 5.8.3 分发包 + 内置 CLI 2.161.0 是当前线上版本（asar package.json /
-// ~/.workbuddy/sessions/*.json 实证）。
+// 5.9.2 分发包 + 内置 CLI 2.165.0 是当前线上版本（asar package.json /
+// app.asar.unpacked/cli/package.json 实证）。
 func TestUserAgentDefaultEmptyKeepsClientUA(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -162,16 +162,16 @@ func TestFetchModelsUsesConfiguredUA(t *testing.T) {
 // --- A 段：UA 对齐官方 WorkBuddy 三段式 ---
 
 const (
-	defaultUAString      = "WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0"
+	defaultUAString      = "WorkBuddy/5.9.2 WorkBuddy/5.9.2 CLI/2.165.0"
 	explicitString       = "MyCustomAgent/3.1"
-	clientVerUAString    = "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.161.0"
+	clientVerUAString    = "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.165.0"
 	billingUAWorkBuddy   = defaultUAString
-	billingUACustomVer   = "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.161.0"
+	billingUACustomVer   = "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.165.0"
 	billingUAAgentString = "BillingAgent/1"
 )
 
 // TestUserAgentDefaultWorkBuddyShape 默认（无任何配置）聊天/刷新出站 UA =
-// 官方 WorkBuddy 三段式（5.8.3 + CLI 2.161.0）。
+// 官方 WorkBuddy 三段式（5.9.2 + CLI 2.165.0）。
 func TestUserAgentDefaultWorkBuddyShape(t *testing.T) {
 	a := &auth.Auth{AccessToken: "at", UID: "u1"}
 	c := &Client{
@@ -320,10 +320,10 @@ func TestBillingUA_WhenClientNameEmpty(t *testing.T) {
 	if _, _, err := c.UserResource(a); err != nil {
 		t.Errorf("userResource: %v", err)
 	}
-	if ua != "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.161.0" {
+	if ua != "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.165.0" {
 		t.Errorf("billing UA = %q want full official UA", ua)
 	}
-	if got := c.billingUA(a); got != "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.161.0" {
+	if got := c.billingUA(a); got != "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.165.0" {
 		t.Errorf("billingUA() = %q want full official UA", got)
 	}
 	// 显式 SaaS 还原旧行为（不设 UA）。

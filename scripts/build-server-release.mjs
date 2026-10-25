@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 
-const version = process.argv[2] ?? '1.13.0-panel'
+const version = process.argv[2] ?? '1.14.0-panel'
 const source = fileURLToPath(new URL('../upstream/workbuddy2api-panel', import.meta.url))
 const dist = fileURLToPath(new URL('../dist', import.meta.url))
 const targets = [
@@ -22,7 +22,9 @@ const targets = [
   { goos: 'darwin', goarch: 'amd64', key: 'darwin-x64', ext: '' },
   { goos: 'linux', goarch: 'amd64', key: 'linux-x64', ext: '' },
   { goos: 'linux', goarch: 'arm64', key: 'linux-arm64', ext: '' },
-  { goos: 'win32', goarch: 'amd64', key: 'win32-x64', ext: '.exe' },
+  // 注意 goos 是 Go 的取值（windows），key 是 Node/面板侧的 platform 名（win32）；
+  // 两者不同源，写成 goos:'win32' 会让 go build 直接报 unsupported GOOS/GOARCH pair。
+  { goos: 'windows', goarch: 'amd64', key: 'win32-x64', ext: '.exe' },
 ]
 if (!existsSync(source)) {
   console.error('missing upstream/workbuddy2api-panel')

@@ -141,7 +141,7 @@ func TestNonChatModelGenerationTags(t *testing.T) {
 }
 
 // TestDesktopUAForGlobalAccount 桌面端 UA 的平台段以**分发包代码**为准：
-// 5.8.3（国内）与 5.8.4（com.workbuddy.workbuddy-ai，WorkBuddy AI 海外版）的
+// 5.9.2（国内）与海外包（com.workbuddy.workbuddy-ai，WorkBuddy AI）的
 // main/server.js buildVlmGatewayHeaders() 都把第二段硬编码成 "WorkBuddy"，
 // 不随 realm 变化。旧实现让海外账号发 "WorkBuddy AI"（5.5.2 intl 包的旧观察），
 // 与 5.8.x 分发包不一致。
@@ -150,7 +150,7 @@ func TestDesktopUAForGlobalAccount(t *testing.T) {
 	global := &auth.Auth{UID: "u1", Domain: "www.workbuddy.ai"}
 	global.BackfillRealm()
 	ua := c.defaultWorkBuddyUAFor(global)
-	if want := "WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/"; !contains(ua, want) {
+	if want := "WorkBuddy/5.9.2 WorkBuddy/5.9.2 CLI/"; !contains(ua, want) {
 		t.Errorf("global desktop UA = %q, want prefix %q", ua, want)
 	}
 	if contains(ua, "WorkBuddy AI") {

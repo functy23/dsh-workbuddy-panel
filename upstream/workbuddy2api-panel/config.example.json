@@ -71,7 +71,17 @@
     "device_token_file": "",
     "passthrough_ip": false,
     "ua_client_name": "",
-    "chat_fingerprint": "cli"
+    "chat_fingerprint": "cli",
+    "desktop_os": "",
+    "desktop_arch": "",
+    "desktop_os_version": "",
+    "desktop_cpu_model": "",
+    "desktop_cpu_cores": 0,
+    "desktop_memory_size": 0,
+    "desktop_timezone": "",
+    "desktop_commit": "",
+    "desktop_release_date": 0,
+    "qimei36": ""
   },
   "features": {
     "sanitize_blacklist_fingerprints": true

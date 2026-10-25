@@ -786,6 +786,25 @@ type Client struct {
 	// DeviceTokenFile 设备 token 文件路径兜底（宿主落盘的桌面端 token，5 分钟读取缓存）。
 	DeviceTokenFile string
 
+	// 桌面事件（POST /v2/report）的机器指纹。真实值来自宿主进程
+	// （OSEventProcessor：process.platform()/arch()/os.release()/os.cpus()/os.totalmem()），
+	// 容器内拿不到，故配置覆盖；空 = 真机缺省样本（darwin/arm64/23.6.0/Apple M2/8/16）。
+	DesktopOS         string
+	DesktopArch       string
+	DesktopOSVersion  string
+	DesktopCPUModel   string
+	DesktopCPUCores   int
+	DesktopMemorySize int
+	// DesktopTimezone 事件 timezone 字段（官方 Intl 解析）；空 = Asia/Shanghai。
+	DesktopTimezone string
+	// DesktopCommit / DesktopReleaseDate 事件 commit/releaseDate——来自**远端 product
+	// 配置**的 date/commit，不是 app 版本号；空/0 = 5.9.2 包内 product.json 值。
+	DesktopCommit      string
+	DesktopReleaseDate int64
+	// Qimei36 真机 QIMEI 标识（qimei36）。空 = 不发该字段：只有原生 QIMEI SDK
+	// 能产出可验签的值，伪造值比缺字段更容易被识别。
+	Qimei36 string
+
 	ChatBaseCN    string
 	BillingBaseCN string
 	// WebBaseCN 官网（workbuddy.cn）域：部分「任务领奖」类接口只在此域提供
@@ -1553,6 +1572,9 @@ func (c *Client) fetchEnterpriseModels(a *auth.Auth) ([]ModelInfo, error) {
 		return nil, err
 	}
 	c.CommonHeaders(req, a) // 复用共享官方头族
+	// 模型目录端点（app.asar/main/account.js#getModels）是主进程里少见的
+	// **浏览器形状**请求：显式 Accept + X-Requested-With: XMLHttpRequest。
+	applyModelCatalogHeaders(req, endpoint)
 	// 401 自动刷新重放（见 auth_replay.go）。
 	resp, err := c.sendWithAuthReplay(c.HTTP, req)
 	if err != nil {

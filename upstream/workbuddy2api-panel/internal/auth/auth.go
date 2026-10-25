@@ -39,6 +39,14 @@ type Auth struct {
 	Nickname     string
 	FilePath     string // 来源文件；refresh 后原子写回此处
 
+	// IDSource 身份来源（X-Id-Source 头 + X-Userinfo 的 id_source 键）。
+	// 5.9.2 的 CLI 身份拦截器在 account.idSource 非空时必发；auth 文件可写
+	// "id_source"（嵌套形放 account 里，扁平形放顶层），缺省空 = 不发该头。
+	IDSource string
+	// DepartmentFullName 部门全名（X-Department-Info 头）。同上，可写
+	// "departmentFullName"；缺省空 = 不发该头。
+	DepartmentFullName string
+
 	// DeviceToken 设备风控 Token（X-Device-Token 头），来源 auth 文件的 device_token 键。
 	// 缺省为空 = 不注入该头（容器内无桌面端 Turing SDK 的常见部署）。
 	// 手写扁平形 auth 文件可直接写 "device_token": "..."；插件 OAuth 嵌套形
@@ -311,6 +319,9 @@ func Parse(raw []byte) (*Auth, error) {
 				UID          string `json:"uid"`
 				EnterpriseID string `json:"enterpriseId"`
 				Nickname     string `json:"nickname"`
+				// 5.9.2 身份拦截器的两个可选身份头来源。
+				IDSource           string `json:"idSource"`
+				DepartmentFullName string `json:"departmentFullName"`
 			} `json:"account"`
 			// DeviceToken 顶层 device_token（嵌套形与扁平形共用；手写时无需嵌进 auth 对象）。
 			DeviceToken string `json:"device_token"`
@@ -319,15 +330,17 @@ func Parse(raw []byte) (*Auth, error) {
 			return nil, fmt.Errorf("storage_parse_error: %w", err)
 		}
 		a = Auth{
-			AccessToken:  n.Auth.AccessToken,
-			RefreshToken: n.Auth.RefreshToken,
-			ExpiresAt:    n.Auth.ExpiresAt,
-			Domain:       n.Auth.Domain,
-			realm:        n.Auth.Realm,
-			UID:          n.Account.UID,
-			EnterpriseID: n.Account.EnterpriseID,
-			Nickname:     n.Account.Nickname,
-			DeviceToken:  n.DeviceToken,
+			AccessToken:        n.Auth.AccessToken,
+			RefreshToken:       n.Auth.RefreshToken,
+			ExpiresAt:          n.Auth.ExpiresAt,
+			Domain:             n.Auth.Domain,
+			realm:              n.Auth.Realm,
+			UID:                n.Account.UID,
+			EnterpriseID:       n.Account.EnterpriseID,
+			Nickname:           n.Account.Nickname,
+			IDSource:           n.Account.IDSource,
+			DepartmentFullName: n.Account.DepartmentFullName,
+			DeviceToken:        n.DeviceToken,
 		}
 	} else {
 		var f struct {
@@ -339,21 +352,26 @@ func Parse(raw []byte) (*Auth, error) {
 			UID          string `json:"uid"`
 			EnterpriseID string `json:"enterpriseId"`
 			Nickname     string `json:"nickname"`
-			DeviceToken  string `json:"device_token"`
+			// 扁平形身份头来源（与嵌套形 account.* 同名键的 snake_case 变体）。
+			IDSource           string `json:"id_source"`
+			DepartmentFullName string `json:"department_full_name"`
+			DeviceToken        string `json:"device_token"`
 		}
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, fmt.Errorf("storage_parse_error: %w", err)
 		}
 		a = Auth{
-			AccessToken:  f.AccessToken,
-			RefreshToken: f.RefreshToken,
-			ExpiresAt:    f.ExpiresAt,
-			Domain:       f.Domain,
-			realm:        f.Realm,
-			UID:          f.UID,
-			EnterpriseID: f.EnterpriseID,
-			Nickname:     f.Nickname,
-			DeviceToken:  f.DeviceToken,
+			AccessToken:        f.AccessToken,
+			RefreshToken:       f.RefreshToken,
+			ExpiresAt:          f.ExpiresAt,
+			Domain:             f.Domain,
+			realm:              f.Realm,
+			UID:                f.UID,
+			EnterpriseID:       f.EnterpriseID,
+			Nickname:           f.Nickname,
+			IDSource:           f.IDSource,
+			DepartmentFullName: f.DepartmentFullName,
+			DeviceToken:        f.DeviceToken,
 		}
 	}
 	if strings.TrimSpace(a.AccessToken) == "" {
@@ -387,6 +405,15 @@ func (a *Auth) SaveAtomic() error {
 			"enterpriseId": a.EnterpriseID,
 			"nickname":     a.Nickname,
 		},
+	}
+	// 身份头来源（X-Id-Source / X-Department-Info）非空才写回：旧文件里不引入空键。
+	if acct, ok := doc["account"].(map[string]any); ok {
+		if a.IDSource != "" {
+			acct["idSource"] = a.IDSource
+		}
+		if a.DepartmentFullName != "" {
+			acct["departmentFullName"] = a.DepartmentFullName
+		}
 	}
 	// DeviceToken 非空才写回顶层 device_token：避免在无该字段的旧文件里引入空键
 	// （保持与插件 OAuth 输出形状一致，插件读取忽略未知键）。

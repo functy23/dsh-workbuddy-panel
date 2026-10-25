@@ -30,7 +30,6 @@ var officialChatHeaders = []string{
 	"Accept",
 	"Content-Type",
 	"Authorization",
-	"Accept-Encoding",
 	"User-Agent",
 	"X-Product",
 	"X-User-Id",
@@ -41,10 +40,10 @@ var officialChatHeaders = []string{
 	"X-IDE-Version",
 	"X-Agent-Intent",
 	"X-Agent-Type",
+	"X-Agent-Runtime",
 	"X-Agent-Purpose",
 	"X-Private-Data",
 	"X-Domain",
-	"X-CodeBuddy-Request",
 	"X-Conversation-ID",
 	"X-Conversation-Request-ID",
 	"X-Conversation-Message-ID",
@@ -75,8 +74,8 @@ var forbiddenChatHeaders = []string{
 	"X-No-User-Id",
 	"X-No-Enterprise-Id",
 	"X-No-Department-Info",
-	"X-Refresh-Token", // 安全红线：只在 refresh 端点出现
-	"X-Agent-Runtime", // 仅搜索端点
+	"X-Refresh-Token",     // 安全红线：只在 refresh 端点出现
+	"X-CodeBuddy-Request", // VLM 网关 / sidecar 链路专属（模型请求不发）
 }
 
 func newChatReq(t *testing.T, c *Client, a *auth.Auth, meta ChatMeta) *http.Request {
@@ -117,23 +116,26 @@ func TestChatHeadersMatchOfficialFingerprint(t *testing.T) {
 	if got := req.Header.Get("X-Agent-Intent"); got != "craft" {
 		t.Errorf("X-Agent-Intent=%q want craft", got)
 	}
-	if got := req.Header.Get("X-Agent-Type"); got != "cli" {
-		t.Errorf("X-Agent-Type=%q want cli", got)
+	if got := req.Header.Get("X-Agent-Type"); got != "main" {
+		t.Errorf("X-Agent-Type=%q want main（5.9.2 取值域 main/team/subagent/compaction/auxiliary）", got)
 	}
-	if got := req.Header.Get("X-Agent-Purpose"); got != "person_agent" {
-		t.Errorf("X-Agent-Purpose=%q want person_agent（个人会话）", got)
+	if got := req.Header.Get("X-Agent-Runtime"); got != "other" {
+		t.Errorf("X-Agent-Runtime=%q want other（桌面端不设 runtime meta/env）", got)
+	}
+	if got := req.Header.Get("X-Agent-Purpose"); got != "conversation" {
+		t.Errorf("X-Agent-Purpose=%q want conversation（PERSONAL_AGENT_ROLE 桌面端无赋值点）", got)
 	}
 	if got := req.Header.Get("X-Private-Data"); got != "false" {
-		t.Errorf("X-Private-Data=%q want false（模型优化默认开启）", got)
+		t.Errorf("X-Private-Data=%q want false（个人号：模型优化默认开启）", got)
 	}
 	if got := req.Header.Get("X-Auth-Method"); got != "plugin" {
 		t.Errorf("X-Auth-Method=%q want plugin", got)
 	}
-	if got := req.Header.Get("X-CodeBuddy-Request"); got != "1" {
-		t.Errorf("X-CodeBuddy-Request=%q want 1", got)
+	if got := req.Header.Get("Accept"); got != "application/json, text/plain, */*" {
+		t.Errorf("Accept=%q want axios 默认串（5.9.2 模型请求不显式覆盖）", got)
 	}
-	if got := req.Header.Get("Accept-Encoding"); got != "identity" {
-		t.Errorf("Accept-Encoding=%q want identity", got)
+	if got := req.Header.Get("Accept-Encoding"); got != "" {
+		t.Errorf("Accept-Encoding=%q want 空（客户端不发 identity）", got)
 	}
 	if got := req.Header.Get("User-Agent"); got != defaultUAString {
 		t.Errorf("User-Agent=%q want %q", got, defaultUAString)
@@ -172,6 +174,10 @@ func TestEnterpriseAccountUsesConversationPurpose(t *testing.T) {
 	if got := req.Header.Get("X-Agent-Purpose"); got != "conversation" {
 		t.Errorf("X-Agent-Purpose=%q want conversation（企业号）", got)
 	}
+	// 企业号 isEnterpriseEdition → resolveModelOptimizationEnabled=false → 发 true。
+	if got := req.Header.Get("X-Private-Data"); got != "true" {
+		t.Errorf("X-Private-Data=%q want true（企业号）", got)
+	}
 	if got := req.Header.Get("X-Enterprise-Id"); got != "e1" {
 		t.Errorf("X-Enterprise-Id=%q want e1", got)
 	}
@@ -193,7 +199,7 @@ func TestChatFingerprintVLMProfile(t *testing.T) {
 			t.Errorf("vlm 形态应带 %s", h)
 		}
 	}
-	for _, h := range []string{"X-Agent-Type", "X-Userinfo", "X-Auth-Method", "X-Root-Request-ID"} {
+	for _, h := range []string{"X-Agent-Type", "X-Agent-Runtime", "X-Userinfo", "X-Auth-Method", "X-Root-Request-ID"} {
 		if v := req.Header.Get(h); v != "" {
 			t.Errorf("vlm 形态不应带 %s=%q", h, v)
 		}
