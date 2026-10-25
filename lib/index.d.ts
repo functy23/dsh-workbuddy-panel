@@ -729,6 +729,8 @@ declare class WorkBuddy2ApiService {
   private usageCache?;
   private inFlight?;
   private emptyModelReads;
+  /** Consecutive reads that omitted a realm, keyed by realm. */
+  private realmGaps;
   private disposed;
   /** Provider ownership, refreshed once the llm service resolves both routes. */
   private routes;
@@ -751,6 +753,8 @@ declare class WorkBuddy2ApiService {
   private read;
   /** Diff the gateway's catalog against ours and publish the difference. */
   private merge;
+  /** Realms the previous catalog knew and this read did not mention at all. */
+  private realmsMissingFrom;
   /**
    * Record that the browser half ran.
    *

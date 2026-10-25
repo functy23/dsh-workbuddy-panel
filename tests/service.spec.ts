@@ -185,6 +185,35 @@ describe('service discovery', () => {
     expect(service.catalogModels()).toEqual([])
   })
 
+  it('keeps the models of a realm one read forgot to mention', async () => {
+    let models: PanelModel[] = [model('cn:a'), model('global:b')]
+    const service = makeService(async () => models)
+    await service.refresh()
+
+    // The gateway answers 200 with the domestic realm alone while its global
+    // account is unavailable. Adopting that read would make the global session
+    // already running unresolvable ("has no configured model").
+    models = [model('cn:a')]
+    await service.refresh()
+    expect(service.catalogModels().map(entry => entry.id)).toEqual(['cn:a', 'global:b'])
+    expect(service.status().sync.removed).toEqual([])
+    expect(service.status().error).toContain('no global models')
+
+    models = [model('cn:a'), model('global:b')]
+    await service.refresh()
+    expect(service.status().error).toBeUndefined()
+  })
+
+  it('follows a realm that stays gone', async () => {
+    let models: PanelModel[] = [model('cn:a'), model('global:b')]
+    const service = makeService(async () => models)
+    await service.refresh()
+    models = [model('cn:a')]
+    for (let read = 0; read < 4; read += 1) await service.refresh()
+    expect(service.catalogModels().map(entry => entry.id)).toEqual(['cn:a'])
+    expect(service.status().sync.removed).toEqual(['global:b'])
+  })
+
   it('reports the pool and the reasoning levels the panel declares', async () => {
     const service = makeService(async () => [model('cn:a', 'A', ['off', 'high', 'max'])])
     await service.refresh()

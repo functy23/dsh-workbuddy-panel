@@ -26,7 +26,7 @@ import { readUsage } from './usage.ts'
 import type { UsageSummary } from './usage.ts'
 import { readStoreDocument, writeStoreDocument } from './store-file.ts'
 import { buildCatalog, hiddenIds, panelHiddenList, isThinkingLevel, regionOfModel } from './catalog.ts'
-import type { CatalogModel, ModelOverride, ThinkingLevel } from './catalog.ts'
+import type { CatalogModel, ModelOverride, ModelRegion, ThinkingLevel } from './catalog.ts'
 import type { ModelOverridesStore } from './overrides-store.ts'
 import type { ConnectionSettings, ConnectionStore } from './settings-store.ts'
 import { PanelClient, PanelError, safeMessage } from './panel-client.ts'
@@ -35,6 +35,19 @@ import type { PanelSupervisor, SupervisorStatus } from './supervisor.ts'
 
 /** Format version of the cached catalog document. */
 const CACHE_VERSION = 2
+
+/** The realms the gateway serves, in the order the picker shows them. */
+const REALMS: readonly ModelRegion[] = ['cn', 'global']
+
+/**
+ * How many reads in a row may omit a realm before its models are dropped.
+ *
+ * The gateway answers /panel/api/models one realm at a time and silently leaves
+ * out a realm it could not read (no available account, upstream fetch empty).
+ * The answer is still 200 and still carries the other realm, so one read is not
+ * evidence that the missing realm's models are gone — three in a row is.
+ */
+const REALM_GAP_TOLERANCE = 3
 
 /** One account as the browser sees it. */
 export interface WebAccount {
@@ -285,6 +298,8 @@ export class WorkBuddy2ApiService {
   private usageCache?: { at: number, summary: UsageSummary }
   private inFlight?: Promise<void>
   private emptyModelReads = 0
+  /** Consecutive reads that omitted a realm, keyed by realm. */
+  private realmGaps = new Map<ModelRegion, number>()
   private disposed = false
   /** Provider ownership, refreshed once the llm service resolves both routes. */
   private routes: { cn: ProviderRouteState, global: ProviderRouteState }
@@ -410,11 +425,35 @@ export class WorkBuddy2ApiService {
     const overrides = this.options.overrides.all()
     const previous = new Map(this.catalog.map(model => [model.id, model]))
     const merged = buildCatalog(models, overrides)
+    // A realm the answer never mentions is held, not deleted. The gateway lists
+    // one realm at a time and drops a realm it could not read, while still
+    // answering 200 with the other one — indistinguishable here from a deletion,
+    // and adopting it makes every session already running on that realm
+    // unresolvable ("has no configured model"). Hold the previous list for a few
+    // reads; a realm that really is gone is followed after that.
+    // An entirely empty answer is the empty-read guard's business above; this one
+    // only covers a non-empty list that silently dropped one realm.
+    const missing = models.length === 0 ? [] : this.realmsMissingFrom(merged)
+    const held = missing.filter(region => {
+      const streak = (this.realmGaps.get(region) ?? 0) + 1
+      this.realmGaps.set(region, streak)
+      return streak <= REALM_GAP_TOLERANCE
+    })
+    for (const region of REALMS) if (!missing.includes(region)) this.realmGaps.delete(region)
+    const next = held.length === 0
+      ? merged
+      : [...merged, ...this.catalog.filter(model => held.includes(model.region))]
+    if (held.length > 0) {
+      this.snapshot = {
+        ...this.snapshot,
+        error: 'gateway returned no ' + held.join(' or ') + ' models; keeping the previous list',
+      }
+    }
     const added: string[] = []
     const changed: string[] = []
     const seen = new Set<string>()
     const adoptAll = this.sync.autoRegister || previous.size === 0
-    for (const model of merged) {
+    for (const model of next) {
       seen.add(model.id)
       const before = previous.get(model.id)
       if (before === undefined) {
@@ -428,7 +467,7 @@ export class WorkBuddy2ApiService {
     // autoRegister off means: keep what the picker already knows, and refuse to
     // grow it without a human click. Removals still apply — a model the gateway
     // stopped answering cannot be sent to it.
-    this.catalog = adoptAll ? merged : merged.filter(model => previous.has(model.id))
+    this.catalog = adoptAll ? next : next.filter(model => previous.has(model.id))
     this.sync = {
       lastSyncedAt: new Date().toISOString(),
       added: added.slice(0, 20),
@@ -438,6 +477,13 @@ export class WorkBuddy2ApiService {
     }
     this.persist()
     if (announce) this.options.onChange?.()
+  }
+
+  /** Realms the previous catalog knew and this read did not mention at all. */
+  private realmsMissingFrom(merged: readonly CatalogModel[]): ModelRegion[] {
+    return REALMS.filter(region =>
+      this.catalog.some(model => model.region === region) &&
+      !merged.some(model => model.region === region))
   }
 
   /**
