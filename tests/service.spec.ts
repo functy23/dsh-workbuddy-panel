@@ -58,6 +58,7 @@ const OVERVIEW: PanelOverview = {
 const HOST = {
   serviceVersion: 1,
   status,
+  kernelUpdate: () => ({ cadence: 'hourly' as const, latestVersion: '1.13.0-panel', available: false, installing: false }),
   serverStatus: (): ServerStatus => ({
     platform: 'darwin',
     arch: 'arm64',

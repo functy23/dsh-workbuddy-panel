@@ -59,10 +59,10 @@ function makeSupervisor(options: {
   const binary = options.binary
   const supervisor = new GatewaySupervisor({
     subprocess: () => options.subprocess,
-    server: {
+    server: () => ({
       resolveBinary: () => binary,
       status: () => serverStatus(binary),
-    },
+    }),
     configPath: () => join(workdir, 'config.json'),
     workdir: () => workdir,
     port: () => options.port ?? 59_999,

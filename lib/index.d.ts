@@ -1,4 +1,4 @@
-import { a as GatewayState, c as ServerDownloadStatus, i as GatewayLogLine, l as ServerStatus, n as GATEWAY_HOST_SERVICE_VERSION, o as GatewayStatus, r as GatewayHost, s as ServerDownloadState, t as GATEWAY_HOST_SERVICE } from "./gateway-contract-DtSPpa7v.js";
+import { a as GatewayState, c as KernelUpdateStatus, d as ServerStatus, i as GatewayLogLine, l as ServerDownloadState, n as GATEWAY_HOST_SERVICE_VERSION, o as GatewayStatus, r as GatewayHost, s as KernelCheckCadence, t as GATEWAY_HOST_SERVICE, u as ServerDownloadStatus } from "./gateway-contract-C6PWwSdB.js";
 import z from "@deepseek-ai/schemastery";
 import { ImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
 import "@earendil-works/pi-ai";
@@ -463,6 +463,8 @@ interface WebStatus {
   gateway: GatewayStatus;
   /** The separately downloaded server artifact. */
   server: ServerStatus;
+  /** Kernel discovery: cadence, last check, and the version the channel offers. */
+  kernel: KernelUpdateStatus;
   panel: {
     connected: boolean;
     version?: string;
@@ -610,6 +612,12 @@ declare class WorkBuddy2ApiService {
   cancelServerDownload(): Promise<ActionOutcome>;
   /** Re-hash the installed server binary. */
   verifyServer(): Promise<ActionOutcome>;
+  /** Ask the release channel for a newer kernel. */
+  checkKernelUpdate(): Promise<ActionOutcome>;
+  /** Install the version the last check discovered. */
+  installKernelUpdate(): Promise<ActionOutcome>;
+  /** Persist the automatic check cadence. */
+  setKernelCadence(cadence: KernelCheckCadence): ActionOutcome;
   /** Probe the gateway without changing the process. */
   testConnection(): Promise<ActionOutcome>;
   /** Enable or disable one model in the picker, and/or pin its reasoning level. */
@@ -739,6 +747,13 @@ type GatewayAction = {
   action: 'server-cancel';
 } | {
   action: 'server-verify';
+} | {
+  action: 'kernel-check';
+} | {
+  action: 'kernel-install';
+} | {
+  action: 'kernel-cadence';
+  cadence: 'hourly' | 'never';
 } | {
   action: 'connection';
   panelUrl?: string;

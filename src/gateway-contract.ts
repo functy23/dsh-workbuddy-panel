@@ -119,12 +119,45 @@ export interface ServerStatus {
   error?: string
 }
 
+/** How often the host row looks for a newer kernel. */
+export type KernelCheckCadence = 'hourly' | 'never'
+
+/**
+ * Kernel update discovery state.
+ *
+ * The packaged `server.json` stays the floor: discovery only ever *offers* a
+ * newer release, and installing one still goes through the same gzip → size →
+ * SHA-256 → atomic rename path as the pinned download.
+ */
+export interface KernelUpdateStatus {
+  /** The cadence the user picked; persisted next to the plugin's documents. */
+  cadence: KernelCheckCadence
+  /** ISO time of the last completed check, successful or not. */
+  lastCheckedAt?: string
+  /** The newest version the channel offers, when a check succeeded. */
+  latestVersion?: string
+  /** True when `latestVersion` is newer than the active kernel. */
+  available: boolean
+  /** True while a newer kernel is downloading or installing. */
+  installing: boolean
+  /** Why the last check failed, when it did. */
+  error?: string
+}
+
 /** What the panel reads from the host row. */
 export interface GatewayHost {
   /** Contract generation; the panel refuses a row it cannot understand. */
   readonly serviceVersion: number
   status(): GatewayStatus
   serverStatus(): ServerStatus
+  /** Kernel discovery state, including the persisted cadence. */
+  kernelUpdate(): KernelUpdateStatus
+  /** Check the channel now; resolves with the post-check state. */
+  checkKernelUpdate(): Promise<KernelUpdateStatus>
+  /** Download and install the discovered kernel, then adopt it. */
+  installKernelUpdate(): Promise<ServerStatus>
+  /** Persist a new cadence and reschedule the timer. */
+  setKernelCadence(cadence: KernelCheckCadence): KernelUpdateStatus
   start(): Promise<GatewayStatus>
   stop(): Promise<GatewayStatus>
   restart(): Promise<GatewayStatus>
@@ -140,4 +173,4 @@ export interface GatewayHost {
 export const GATEWAY_HOST_SERVICE = 'workbuddy2apiGateway'
 
 /** The contract generation this panel understands. */
-export const GATEWAY_HOST_SERVICE_VERSION = 1
+export const GATEWAY_HOST_SERVICE_VERSION = 2

@@ -22,7 +22,7 @@ import type { StatusDocument } from './status-document.ts'
 import type { Translate } from './copy.ts'
 import { formatTokens } from './copy.ts'
 import type { WebAccount, WebModel } from '../service.ts'
-import type { ServerStatus } from '../gateway-contract.ts'
+import type { KernelUpdateStatus, ServerStatus } from '../gateway-contract.ts'
 import type { ThinkingLevel } from '../catalog.ts'
 import { AccountCard, gatewayStateText, gatewayTone } from './panel-view.tsx'
 import { UsageCard } from './usage-card.tsx'
@@ -643,6 +643,93 @@ function ServerCard(props: {
   )
 }
 
+/** Kernel updates: the release channel, its cadence, and one-click install. */
+function KernelCard(props: {
+  t: Translate
+  store: PanelStore
+  kernel: KernelUpdateStatus
+  server: ServerStatus
+  pending?: string
+}): ReactElement {
+  const { t, store, kernel, server, pending } = props
+  const busy = pending !== undefined
+  const tone: 'ok' | 'warn' | 'error' = kernel.error !== undefined
+    ? 'error'
+    : kernel.available
+      ? 'warn'
+      : 'ok'
+  const badgeTone: 'ok' | 'warn' | 'error' | 'muted' = tone
+  const stateText = kernel.error !== undefined
+    ? t('kernelStateError')
+    : kernel.installing
+      ? t('kernelStateInstalling')
+      : kernel.available
+        ? t('kernelStateAvailable')
+        : t('kernelStateIdle')
+  const lastCheck = kernel.lastCheckedAt === undefined
+    ? '—'
+    : new Date(kernel.lastCheckedAt).toLocaleString()
+  return (
+    <SettingsGroup
+      title={t('kernelTitle')}
+      description={t('kernelDesc')}
+      action={(
+        <>
+          <ActionButton
+            label={t('kernelCheck')}
+            disabled={busy || kernel.installing}
+            onClick={() => { void store.act({ action: 'kernel-check' }, 'kernel-check') }}
+          />
+          {kernel.available
+            ? (
+              <ActionButton
+                label={t('kernelInstall')}
+                tone="primary"
+                disabled={busy || kernel.installing}
+                onClick={() => { void store.act({ action: 'kernel-install' }, 'kernel-install') }}
+              />
+            )
+            : null}
+        </>
+      )}
+    >
+      <SettingRow
+        title={(
+          <>
+            <StatusDot tone={tone} title={stateText} />
+            {t('kernelTitle')}
+            <Badge tone={badgeTone}>{stateText}</Badge>
+          </>
+        )}
+        error={kernel.error}
+      />
+      <SettingRow
+        title={t('kernelCadence')}
+        control={(
+          <SegmentedField
+            label={t('kernelCadence')}
+            value={kernel.cadence}
+            disabled={busy || kernel.installing}
+            onChange={(value) => {
+              void store.act(
+                { action: 'kernel-cadence', cadence: value === 'never' ? 'never' : 'hourly' },
+                'kernel-cadence',
+              )
+            }}
+            options={[
+              { value: 'hourly', label: t('kernelCadenceHourly') },
+              { value: 'never', label: t('kernelCadenceNever') },
+            ]}
+          />
+        )}
+      />
+      <SettingRow title={t('kernelCurrent')} control={<span className="wb2-mono">{server.version}</span>} />
+      <SettingRow title={t('kernelLatest')} control={<span className="wb2-mono">{kernel.latestVersion ?? '—'}</span>} />
+      <SettingRow title={t('kernelLastCheck')} control={<span className="wb2-mono">{lastCheck}</span>} />
+    </SettingsGroup>
+  )
+}
+
 /** The process: state, controls, where it lives, and what it printed. */
 function GatewayTab(props: {
   t: Translate
@@ -658,6 +745,7 @@ function GatewayTab(props: {
   return (
     <>
       <ServerCard t={t} store={store} server={server} pending={pending} />
+      <KernelCard t={t} store={store} kernel={document.kernel} server={server} pending={pending} />
       <SettingsGroup
         title={t('gatewayTitle')}
         description={t('gatewayDesc')}

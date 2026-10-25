@@ -75,5 +75,11 @@ const manifest = {
   releaseBaseUrl: 'https://github.com/functy23/dsh-workbuddy-panel/releases/download',
   assets,
 }
-writeFileSync(new URL('../server.json', import.meta.url), JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+const document = JSON.stringify(manifest, null, 2) + '\n'
+writeFileSync(new URL('../server.json', import.meta.url), document, 'utf8')
+// The release must ALSO carry the manifest as an asset: that is how the panel's
+// "check for updates" discovers a newer kernel without a panel release.
+writeFileSync(join(dist, 'server.json'), document, 'utf8')
 console.log('wrote server.json with ' + Object.keys(assets).length + ' assets')
+console.log('upload dist/server.json together with the .gz assets:')
+console.log('  gh release create server-v' + version + ' dist/workbuddy2api-' + version + '-*.gz dist/server.json ...')

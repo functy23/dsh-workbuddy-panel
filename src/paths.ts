@@ -46,6 +46,22 @@ export function gatewayConfigPath(): string {
   return join(gatewayWorkdir(), 'config.json')
 }
 
+/**
+ * The manifest the cache is currently pinned to.
+ *
+ * Starts absent (the packaged `server.json` wins). A kernel installed from the
+ * release channel writes its manifest here, so a restart keeps serving the
+ * version the user chose instead of silently falling back to the packaged pin.
+ */
+export function activeServerManifestPath(): string {
+  return join(serverRootDir(), 'manifest.json')
+}
+
+/** Kernel update cadence + last check time, written by the settings page. */
+export function kernelUpdateSettingsPath(): string {
+  return join(pluginDataDir(), 'kernel-update.json')
+}
+
 /** The gateway's own usage ledger (one bucket per hour, realm, account, model). */
 export function gatewayUsagePath(): string {
   return join(gatewayWorkdir(), 'data', 'usage.json')

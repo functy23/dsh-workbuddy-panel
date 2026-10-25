@@ -37,7 +37,7 @@
 
 ## 硬性约定
 
-0. **服务端只有一个来源**：`server.json` 里的固定版本 + 每个平台的 SHA-256，加上 `~/.dsh/workbuddy2api-gateway/server/<version>/<platform>/` 的校验缓存。不要恢复 PATH / 目录探测或"可配置路径"；`bin/workbuddy2api` 只是本地开发二进制，用来生成 manifest 和填充本地缓存，**不进 npm 包**。要换版本就发新的 server Release、更新 `server.json`，再发面板。
+0. **服务端只有一个来源，但有两条进入路径**：包内 `server.json`（固定版本 + 每平台 SHA-256）是**地板**，加上 `~/.dsh/workbuddy2api-gateway/server/<version>/<platform>/` 的校验缓存。放开的那条是 Release 通道：host row 可以按 `upstream.checkUpdates`（每小时 / 永不）向 GitHub Release 的 `server.json` 资产查新版本，用户点"安装内核"后才落盘；装好的版本把 manifest 写进 `server/manifest.json`，重启继续用它，直到包内 pin 追上来。**无论走哪条，下载都必须过 gzip → 大小 → SHA-256 → 原子 rename**，清单只决定"下哪个版本"，不放松校验。不要恢复 PATH / 目录探测或"可配置路径"；`bin/workbuddy2api` 只是本地开发二进制，用来生成 manifest 和填充本地缓存，**不进 npm 包**。
 1. **upstream/ 是只读快照**：不要在那里改网关逻辑。
 2. **不碰宿主**：不修改 DSH 的安装目录、不 patch 宿主 bundle。宿主没给的位（比如设置导航图标）用"打标记 + 自己的 CSS"实现。
 3. **不引运行时依赖**：QR 编码器是手写的（`qr-code.ts`），不要换成 npm 包；UI 原子来自宿主 seed 模块。唯一例外见下一条。
@@ -60,16 +60,20 @@
 
 服务端和面板分开：
 
-    # 1. 构建并发布服务端资产
-    pnpm run server:build 1.13.0-panel
-    gh release create server-v1.13.0-panel \
-      dist/workbuddy2api-1.13.0-panel-*.gz \
-      --title server-v1.13.0-panel --notes "..."
+    # 1. 构建并发布服务端资产（务必带 dist/server.json：内核自动更新靠它发现新版本）
+    pnpm run server:build 1.14.0-panel
+    gh release create server-v1.14.0-panel \
+      dist/workbuddy2api-1.14.0-panel-*.gz \
+      dist/server.json \
+      --title server-v1.14.0-panel --notes "..."
 
     # 2. 发布面板（server.json 已带校验值）
     pnpm run check
     npm pack --dry-run
-    git tag v0.4.0 && git push --tags
-    gh release create v0.4.0 --title v0.4.0 --notes "..."
+    git tag v0.5.0 && git push --tags
+    gh release create v0.5.0 --title v0.5.0 --notes "..."
+
+忘了传 `dist/server.json` 时，老面板仍能按包内 pin 安装，但"检查更新"会报
+`release … has no server.json asset`；补传用 `gh release upload server-v<ver> dist/server.json`。
 
 版本号写在 `package.json`；`tsdown` 通过 `define` 把它注入 `src/version.ts`，UI 上的版本徽章读的是同一个值。服务端版本写在 `server.json`，由 host gateway row 读取。

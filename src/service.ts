@@ -31,7 +31,7 @@ import type { ModelOverridesStore } from './overrides-store.ts'
 import type { ConnectionSettings, ConnectionStore } from './settings-store.ts'
 import { PanelClient, PanelError, safeMessage } from './panel-client.ts'
 import type { AccountOp, BulkOp, PanelAccount, PanelModel, PanelOverview } from './panel-client.ts'
-import type { GatewayHost, GatewayState, GatewayStatus, ServerStatus } from './gateway-contract.ts'
+import type { GatewayHost, GatewayState, GatewayStatus, KernelCheckCadence, KernelUpdateStatus, ServerStatus } from './gateway-contract.ts'
 import { serverManifest } from './server-release.ts'
 
 /** Format version of the cached catalog document. */
@@ -146,6 +146,8 @@ export interface WebStatus {
   gateway: GatewayStatus
   /** The separately downloaded server artifact. */
   server: ServerStatus
+  /** Kernel discovery: cadence, last check, and the version the channel offers. */
+  kernel: KernelUpdateStatus
   panel: {
     connected: boolean
     version?: string
@@ -327,6 +329,11 @@ function portFromPanelUrl(url: string): number {
 }
 
 /** The pinned server shape when the host row is missing. */
+/** Kernel state before the host row is loaded. */
+function fallbackKernelUpdate(): KernelUpdateStatus {
+  return { cadence: 'hourly', available: false, installing: false, error: 'the host gateway row is not loaded' }
+}
+
 function fallbackServerStatus(): ServerStatus {
   try {
     const manifest = serverManifest()
@@ -637,6 +644,8 @@ export class WorkBuddy2ApiService {
       },
       gateway,
       server,
+      // Optional call: a host row from an older generation may not offer this.
+      kernel: host?.kernelUpdate?.() ?? fallbackKernelUpdate(),
       panel: {
         // "Connected" needs both halves: the process is up and the last read
         // actually reached it. A cached overview from before a stop must not
@@ -771,6 +780,42 @@ export class WorkBuddy2ApiService {
       ...server.error === undefined ? {} : { message: server.error },
       status: this.status(),
     }
+  }
+
+  /** Ask the release channel for a newer kernel. */
+  async checkKernelUpdate(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const kernel = await host.checkKernelUpdate()
+    if (kernel.error !== undefined) return { ok: false, message: kernel.error, status: this.status() }
+    return {
+      ok: true,
+      message: kernel.available
+        ? 'kernel ' + String(kernel.latestVersion ?? '') + ' is available'
+        : 'kernel is up to date',
+      status: this.status(),
+    }
+  }
+
+  /** Install the version the last check discovered. */
+  async installKernelUpdate(): Promise<ActionOutcome> {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    const server = await host.installKernelUpdate()
+    const message = server.download.error ?? server.error
+    return {
+      ok: server.installed && message === undefined,
+      ...message === undefined ? {} : { message },
+      status: this.status(),
+    }
+  }
+
+  /** Persist the automatic check cadence. */
+  setKernelCadence(cadence: KernelCheckCadence): ActionOutcome {
+    const host = this.host()
+    if (host === undefined) return { ok: false, message: 'the host gateway row is not loaded', status: this.status() }
+    host.setKernelCadence(cadence)
+    return { ok: true, message: 'kernel update cadence saved', status: this.status() }
   }
 
   /** Probe the gateway without changing the process. */

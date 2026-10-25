@@ -111,12 +111,43 @@ interface ServerStatus {
   /** The last download or verification failure. */
   error?: string;
 }
+/** How often the host row looks for a newer kernel. */
+type KernelCheckCadence = 'hourly' | 'never';
+/**
+ * Kernel update discovery state.
+ *
+ * The packaged `server.json` stays the floor: discovery only ever *offers* a
+ * newer release, and installing one still goes through the same gzip → size →
+ * SHA-256 → atomic rename path as the pinned download.
+ */
+interface KernelUpdateStatus {
+  /** The cadence the user picked; persisted next to the plugin's documents. */
+  cadence: KernelCheckCadence;
+  /** ISO time of the last completed check, successful or not. */
+  lastCheckedAt?: string;
+  /** The newest version the channel offers, when a check succeeded. */
+  latestVersion?: string;
+  /** True when `latestVersion` is newer than the active kernel. */
+  available: boolean;
+  /** True while a newer kernel is downloading or installing. */
+  installing: boolean;
+  /** Why the last check failed, when it did. */
+  error?: string;
+}
 /** What the panel reads from the host row. */
 interface GatewayHost {
   /** Contract generation; the panel refuses a row it cannot understand. */
   readonly serviceVersion: number;
   status(): GatewayStatus;
   serverStatus(): ServerStatus;
+  /** Kernel discovery state, including the persisted cadence. */
+  kernelUpdate(): KernelUpdateStatus;
+  /** Check the channel now; resolves with the post-check state. */
+  checkKernelUpdate(): Promise<KernelUpdateStatus>;
+  /** Download and install the discovered kernel, then adopt it. */
+  installKernelUpdate(): Promise<ServerStatus>;
+  /** Persist a new cadence and reschedule the timer. */
+  setKernelCadence(cadence: KernelCheckCadence): KernelUpdateStatus;
   start(): Promise<GatewayStatus>;
   stop(): Promise<GatewayStatus>;
   restart(): Promise<GatewayStatus>;
@@ -134,6 +165,6 @@ interface GatewayHost {
 /** The Cordis service name the host row registers. */
 declare const GATEWAY_HOST_SERVICE = "workbuddy2apiGateway";
 /** The contract generation this panel understands. */
-declare const GATEWAY_HOST_SERVICE_VERSION = 1;
+declare const GATEWAY_HOST_SERVICE_VERSION = 2;
 //#endregion
-export { GatewayState as a, ServerDownloadStatus as c, GatewayLogLine as i, ServerStatus as l, GATEWAY_HOST_SERVICE_VERSION as n, GatewayStatus as o, GatewayHost as r, ServerDownloadState as s, GATEWAY_HOST_SERVICE as t };
+export { GatewayState as a, KernelUpdateStatus as c, ServerStatus as d, GatewayLogLine as i, ServerDownloadState as l, GATEWAY_HOST_SERVICE_VERSION as n, GatewayStatus as o, GatewayHost as r, KernelCheckCadence as s, GATEWAY_HOST_SERVICE as t, ServerDownloadStatus as u };

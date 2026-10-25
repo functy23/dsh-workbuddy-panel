@@ -41,6 +41,10 @@ const document = {
     size: 14_276_994, downloadSize: 7_721_207, releaseUrl: 'https://example.test/server.gz',
     download: { state: 'idle', received: 7_721_207, total: 7_721_207 },
   },
+  kernel: {
+    cadence: 'hourly', lastCheckedAt: '2026-10-24T09:30:00.000Z', latestVersion: '1.14.0-panel',
+    available: true, installing: false,
+  },
   panel: { connected: true, version: '1.13.0-panel', uptimeSec: 3600, authRequired: true },
   sync: { lastSyncedAt: '2026-10-24T09:00:00.000Z', added: ['cn:glm-5v-turbo'], removed: [], changed: [], autoRegister: true },
   counts: { total: 2, healthy: 1, cooling: 1, disabled: 0, paused: 0, models: 2, enabledModels: 1, hiddenModels: 1 },

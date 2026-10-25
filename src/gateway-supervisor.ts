@@ -56,7 +56,14 @@ export interface GatewayServerPort {
 /** What the supervisor reads from its owner. */
 export interface GatewaySupervisorOptions {
   subprocess(): SubprocessLike | undefined
-  server: GatewayServerPort
+  /**
+   * The cache to run from, read on every use.
+   *
+   * A getter, not a captured object: installing a kernel from the release
+   * channel swaps the store underneath a running supervisor, and the next start
+   * must resolve the new binary without rebuilding this row.
+   */
+  server(): GatewayServerPort
   configPath(): string
   workdir(): string
   port(): number
@@ -171,7 +178,7 @@ export class GatewaySupervisor {
 
   /** The verified executable this row would run right now. */
   resolveBinary(): string | undefined {
-    return this.options.server.resolveBinary()
+    return this.options.server().resolveBinary()
   }
 
   /**
@@ -321,7 +328,7 @@ export class GatewaySupervisor {
     const config = this.ensureConfig()
     const binary = this.resolveBinary()
     if (binary === undefined) {
-      const server = this.options.server.status()
+      const server = this.options.server().status()
       const installedButInvalid = server.installedVersion !== undefined && server.installedVersion === server.version
       this.state = installedButInvalid ? 'server-invalid' : 'server-missing'
       this.error = server.error ?? (installedButInvalid
@@ -464,7 +471,7 @@ export class GatewaySupervisor {
 
   /** The current snapshot. */
   status(): GatewayStatus {
-    const server = this.options.server.status()
+    const server = this.options.server().status()
     const binary = server.binaryPath
     return {
       state: this.state,

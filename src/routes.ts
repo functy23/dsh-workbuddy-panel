@@ -57,6 +57,9 @@ export type GatewayAction =
   | { action: 'server-download' }
   | { action: 'server-cancel' }
   | { action: 'server-verify' }
+  | { action: 'kernel-check' }
+  | { action: 'kernel-install' }
+  | { action: 'kernel-cadence', cadence: 'hourly' | 'never' }
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null, efforts?: readonly ThinkingLevel[] }
@@ -170,6 +173,12 @@ export function parseAction(text: string): GatewayAction | undefined {
       const region = body['region'] === 'global' ? 'global' : body['region'] === 'cn' ? 'cn' : undefined
       return { action: 'models-all', enabled: body['enabled'], ...region === undefined ? {} : { region } }
     }
+    case 'kernel-check': return { action: 'kernel-check' }
+    case 'kernel-install': return { action: 'kernel-install' }
+    case 'kernel-cadence': {
+      const cadence = body['cadence']
+      return cadence === 'hourly' || cadence === 'never' ? { action: 'kernel-cadence', cadence } : undefined
+    }
     case 'sync-hidden': return { action: 'sync-hidden' }
     case 'login-start': {
       const realm = body['realm'] === 'global' ? 'global' : body['realm'] === 'cn' ? 'cn' : undefined
@@ -278,6 +287,12 @@ export async function runAction(service: WorkBuddy2ApiService, action: GatewayAc
       return service.cancelServerDownload()
     case 'server-verify':
       return service.verifyServer()
+    case 'kernel-check':
+      return service.checkKernelUpdate()
+    case 'kernel-install':
+      return service.installKernelUpdate()
+    case 'kernel-cadence':
+      return Promise.resolve(service.setKernelCadence(action.cadence))
     case 'connection':
       return service.saveConnection({
         ...action.panelUrl === undefined ? {} : { panelUrl: action.panelUrl },
