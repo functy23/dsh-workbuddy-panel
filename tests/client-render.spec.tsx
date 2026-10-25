@@ -22,6 +22,7 @@ const document = {
   ok: true,
   controlKey: 'k',
   version: '0.1.0',
+  piAiVersion: '1.1.0',
   provider: { id: 'workbuddy2api', owned: true },
   connection: { panelUrl: 'http://127.0.0.1:7863', hasApiKey: true, refreshSeconds: 15, syncHiddenToPanel: true, autoRegister: true },
   gateway: {
@@ -47,15 +48,20 @@ const document = {
   ],
   models: [
     {
-      id: 'cn:deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash', credits: 'x0.05',
+      id: 'cn:deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash', region: 'cn', credits: 'x0.05',
       contextLength: 1_000_000, maxOutputTokens: 393_216, efforts: ['off', 'low', 'high', 'max'],
       defaultEffort: 'high', enabled: true, canDisableThinking: true, supportsImages: true,
       supportsReasoning: true, onlyReasoning: false, tags: [],
     },
     {
-      id: 'cn:glm-5.3', name: 'GLM-5.3', contextLength: 1_000_000, maxOutputTokens: 131_072,
+      id: 'cn:glm-5.3', name: 'GLM-5.3', region: 'cn', contextLength: 1_000_000, maxOutputTokens: 131_072,
       efforts: ['low', 'high'], defaultEffort: 'high', enabled: false, canDisableThinking: true,
       supportsImages: true, supportsReasoning: true, onlyReasoning: true, tags: [],
+    },
+    {
+      id: 'global:gpt-5.4', name: 'GPT-5.4', region: 'global', contextLength: 400_000, maxOutputTokens: 128_000,
+      efforts: ['low', 'high'], defaultEffort: 'high', enabled: true, canDisableThinking: true,
+      supportsImages: true, supportsReasoning: true, onlyReasoning: false, tags: [],
     },
   ],
   usage: {
@@ -105,6 +111,15 @@ describe('settings page render', () => {
     expect(html).toContain('下午 10 点')
     expect(html).not.toMatch(/\{\d\}/)
     expect(html).not.toContain('gatewayStateRunning')
+  })
+
+  it('offers a realm tab and starts on the domestic models', () => {
+    const html = renderToStaticMarkup(<WorkBuddy2ApiSettingsPage t={zh} store={store} initialTab="models" />)
+    expect(html).toContain('国内版')
+    expect(html).toContain('国际版')
+    expect(html).toContain('Deepseek-V4.1-Flash')
+    // The tab starts on the domestic realm; the international row is not rendered.
+    expect(html).not.toContain('GPT-5.4')
   })
 
   it('renders the English copy for the same document', () => {

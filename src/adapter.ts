@@ -38,7 +38,8 @@ import type { ImageAttachmentAccess, LlmModelInfo, LlmResolvedModelInfo } from '
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { CatalogModel, ThinkingLevel } from './catalog.ts'
+import { regionOfModel } from './catalog.ts'
+import type { CatalogModel, ModelRegion, ThinkingLevel } from './catalog.ts'
 
 /** Provider route this bundle owns by default. */
 export const WORKBUDDY2API_PROVIDER = 'workbuddy2api'
@@ -77,6 +78,16 @@ function levelLabel(level: ThinkingLevel): string {
 }
 
 /**
+ * Whether an error is the adapter's "this route does not know the model" failure.
+ *
+ * Structural rather than `instanceof LlmError`: a profile can hold two copies of
+ * `dsh-llm`, and a class identity check would then miss the host's own error.
+ */
+function isUnknownModel(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'UNKNOWN_MODEL'
+}
+
+/**
  * Translate one model's offered levels into pi-ai's `thinkingLevelMap`.
  *
  * Every level is pinned explicitly — a supported one to its wire spelling, the
@@ -100,6 +111,15 @@ export function thinkingFields(model: CatalogModel): { reasoning: boolean, think
   return { reasoning: true, thinkingLevelMap: map as ThinkingLevelMap }
 }
 
+/** The reasoning block one catalog row publishes, when it has selectable levels. */
+function reasoningOf(model: CatalogModel): LlmResolvedModelInfo['reasoning'] | undefined {
+  if (!model.supportsReasoning || model.efforts.length === 0) return undefined
+  return {
+    efforts: model.efforts.map(level => ({ id: ReasoningEffortId(level), name: levelLabel(level) })),
+    ...model.defaultEffort === undefined ? {} : { defaultEffort: ReasoningEffortId(model.defaultEffort) },
+  }
+}
+
 /** Build one pi-ai model descriptor pointing at the panel. */
 function toPiModel(model: CatalogModel, baseUrl: string, providerId: string): Model<Api> {
   return {
@@ -121,10 +141,14 @@ function toPiModel(model: CatalogModel, baseUrl: string, providerId: string): Mo
 
 /** Constructor dependencies. */
 export interface WorkBuddy2ApiAdapterOptions {
-  /** Provider route; defaults to {@link WORKBUDDY2API_PROVIDER}. */
+  /** Domestic provider route; defaults to {@link WORKBUDDY2API_PROVIDER}. */
   providerId?: string
-  /** Name the picker shows for the group. */
+  /** International provider route; defaults to `<providerId>-global`. */
+  globalProviderId?: string
+  /** Base name the picker shows; the two groups append ` · CN` / ` · Global`. */
   displayName?: string
+  /** Override for the international group's display name. */
+  globalDisplayName?: string
   /** Live catalog read; called on every listing and resolution. */
   catalog: () => readonly CatalogModel[]
   /** The panel's `/v1` origin, re-read per request so a URL change applies. */
@@ -133,6 +157,14 @@ export interface WorkBuddy2ApiAdapterOptions {
   apiKey: () => string
   /** Model ids the local overrides hide from the picker. */
   hidden: () => readonly string[]
+  /**
+   * Rebuild the host-side adapter snapshot after a catalog change.
+   *
+   * `PiAiAdapter` memoizes one `Models` collection per profile map identity, so
+   * a route whose model list grew can keep answering `UNKNOWN_MODEL` until the
+   * map is replaced. The service calls this whenever its diff finds a change.
+   */
+  invalidate?: () => void
   /**
    * The host's durable attachment service, read per request.
    *
@@ -146,9 +178,18 @@ export interface WorkBuddy2ApiAdapterOptions {
   imageAccess?: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined
 }
 
+/** One provider group the adapter registers with the host. */
+export interface WorkBuddy2ApiProvider {
+  id: string
+  displayName: string
+  region: ModelRegion
+}
+
 /** What {@link createWorkBuddy2ApiAdapter} hands back. */
 export interface WorkBuddy2ApiAdapter {
   adapter: PiAiAdapter
+  /** The two picker groups, domestic first. */
+  providers: readonly WorkBuddy2ApiProvider[]
   /** Announce a catalog change so the pickers re-read their lists. */
   invalidate: () => void
 }
@@ -172,43 +213,100 @@ class PanelPiAiAdapter extends PiAiAdapter {
     private readonly options: {
       catalog: () => readonly CatalogModel[]
       hidden: () => readonly string[]
+      regionOfRoute: (provider: string) => ModelRegion
+      invalidate?: () => void
     },
     adapterOptions: PiAiAdapterOptions,
   ) {
     super(adapterOptions)
   }
 
-  /** Hide locally disabled models from the picker only. */
+  /**
+   * Hide locally disabled models and the other realm from the picker only.
+   *
+   * The domestic route's provider still carries every descriptor, so a session
+   * pinned to it can resolve an international model from before the split; the
+   * list is what makes the two picker groups disjoint.
+   */
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     const models = await super.listModels(provider)
     const hidden = new Set(this.options.hidden())
-    return models.filter(model => !hidden.has(model.id))
+    const region = this.options.regionOfRoute(provider)
+    return models.filter(model => !hidden.has(model.id) && regionOfModel(model.id) === region)
   }
 
   /** Publish the effective level set and default for one model. */
   override async resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
-    const resolved = await super.resolveModel(provider, model, signal)
-    const entry = findModel(this.options.catalog(), model)
-    if (entry === undefined || !entry.supportsReasoning || entry.efforts.length === 0) return resolved
-    return {
-      ...resolved,
-      reasoning: {
-        efforts: entry.efforts.map(level => ({ id: ReasoningEffortId(level), name: levelLabel(level) })),
-        ...entry.defaultEffort === undefined ? {} : { defaultEffort: ReasoningEffortId(entry.defaultEffort) },
-      },
+    try {
+      return this.decorate(await super.resolveModel(provider, model, signal), model)
+    } catch (error: unknown) {
+      const entry = findModel(this.options.catalog(), model)
+      if (!isUnknownModel(error) || entry === undefined) throw error
+      // The catalog knows this model, so the host snapshot is the stale half:
+      // rebuild it once, then answer from the catalog if the retry still misses.
+      this.options.invalidate?.()
+      try {
+        return this.decorate(await super.resolveModel(provider, model, signal), model)
+      } catch {
+        const reasoning = reasoningOf(entry)
+        return {
+          provider,
+          id: entry.id,
+          name: entry.name,
+          ...entry.description === undefined ? {} : { description: entry.description },
+          inputModalities: entry.supportsImages ? ['text', 'image'] : ['text'],
+          context: { contextWindow: entry.contextLength },
+          ...reasoning === undefined ? {} : { reasoning },
+        }
+      }
+    }
+  }
+
+  /**
+   * Prepare one call, rebuilding the adapter snapshot once when the route has
+   * not yet learned a model the catalog already serves.
+   *
+   * `prepareCall` is the path the session takes before a request; without this
+   * retry a model added after registration stays unusable until the next full
+   * adapter invalidation.
+   */
+  override async prepareCall(
+    provider: string,
+    model: string,
+    signal?: AbortSignal,
+  ): ReturnType<PiAiAdapter['prepareCall']> {
+    try {
+      return await super.prepareCall(provider, model, signal)
+    } catch (error: unknown) {
+      if (!isUnknownModel(error) || findModel(this.options.catalog(), model) === undefined) throw error
+      this.options.invalidate?.()
+      return super.prepareCall(provider, model, signal)
     }
   }
 
   /** Stamp the user's default effort onto a request that names none. */
   override stream(options: Parameters<PiAiAdapter['stream']>[0]): ReturnType<PiAiAdapter['stream']> {
-    if (options.reasoningEffort === undefined) {
-      const entry = findModel(this.options.catalog(), options.model)
-      const fallback = entry?.defaultEffort
-      if (entry !== undefined && fallback !== undefined && entry.efforts.includes(fallback)) {
-        return super.stream({ ...options, reasoningEffort: ReasoningEffortId(fallback) })
+    try {
+      if (options.reasoningEffort === undefined) {
+        const entry = findModel(this.options.catalog(), options.model)
+        const fallback = entry?.defaultEffort
+        if (entry !== undefined && fallback !== undefined && entry.efforts.includes(fallback)) {
+          return super.stream({ ...options, reasoningEffort: ReasoningEffortId(fallback) })
+        }
       }
+      return super.stream(options)
+    } catch (error: unknown) {
+      if (!isUnknownModel(error) || findModel(this.options.catalog(), options.model) === undefined) throw error
+      this.options.invalidate?.()
+      return super.stream(options)
     }
-    return super.stream(options)
+  }
+
+  /** Attach the catalog's selectable levels to one resolved model. */
+  private decorate(resolved: LlmResolvedModelInfo, model: string): LlmResolvedModelInfo {
+    const entry = findModel(this.options.catalog(), model)
+    const reasoning = entry === undefined ? undefined : reasoningOf(entry)
+    return reasoning === undefined ? resolved : { ...resolved, reasoning }
   }
 }
 
@@ -223,38 +321,67 @@ class PanelPiAiAdapter extends PiAiAdapter {
  */
 export function createWorkBuddy2ApiAdapter(options: WorkBuddy2ApiAdapterOptions): WorkBuddy2ApiAdapter {
   const providerId = options.providerId ?? WORKBUDDY2API_PROVIDER
-  const displayName = options.displayName ?? 'WorkBuddy2API'
+  const globalProviderId = options.globalProviderId ?? providerId + '-global'
+  const baseName = options.displayName ?? 'WorkBuddy2API'
+  // A caller that already named a realm keeps that name; otherwise the two
+  // groups are the base name plus the realm suffix the picker shows.
+  const cnDisplayName = baseName.endsWith(' · CN') || baseName.endsWith(' · Global')
+    ? baseName
+    : baseName + ' · CN'
+  const globalDisplayName = options.globalDisplayName ?? (cnDisplayName.endsWith(' · CN')
+    ? cnDisplayName.slice(0, -' · CN'.length) + ' · Global'
+    : cnDisplayName + ' · Global')
 
-  const buildModels = (): Model<Api>[] => {
-    const baseUrl = options.v1BaseUrl()
-    return options.catalog().map(model => toPiModel(model, baseUrl, providerId))
-  }
-
-  const base = createProvider({
-    id: providerId,
-    name: displayName,
-    auth: {
-      apiKey: {
-        name: 'workbuddy2api-panel key',
-        async resolve({ credential }) {
-          const apiKey = credential?.key
-          return apiKey === undefined || apiKey.length === 0
-            ? undefined
-            : { auth: { apiKey }, source: 'workbuddy2api-panel' }
-        },
+  const auth = {
+    apiKey: {
+      name: 'workbuddy2api-panel key',
+      async resolve({ credential }: { credential?: { key?: string } }) {
+        const apiKey = credential?.key
+        return apiKey === undefined || apiKey.length === 0
+          ? undefined
+          : { auth: { apiKey }, source: 'workbuddy2api-panel' }
       },
     },
-    models: buildModels(),
-    api: openAICompletionsApi(),
-  })
+  }
 
-  // Reuse the constructed provider for dispatch, but answer the catalog from the
-  // live read: this is the pattern `dsh-llm-pi-ai` itself uses.
-  const provider: Provider = { ...base, getModels: () => buildModels() }
+  const modelsFor = (route: string, region?: ModelRegion): Model<Api>[] => {
+    const baseUrl = options.v1BaseUrl()
+    return options.catalog()
+      .filter(model => region === undefined || model.region === region)
+      .map(model => toPiModel(model, baseUrl, route))
+  }
 
-  const profile: ResolvedPiAiProviderProfile = {
-    provider: providerId,
-    displayName,
+  /**
+   * One provider per realm.
+   *
+   * The domestic provider keeps every descriptor so a session that selected an
+   * international model before the split still resolves on its original route;
+   * `listModels` is what hides the other realm from that picker group.
+   */
+  const makeProvider = (id: string, name: string, models: () => Model<Api>[]): Provider => {
+    const base = createProvider({ id, name, auth, models: models(), api: openAICompletionsApi() })
+    // Reuse the constructed provider for dispatch, but answer the catalog from
+    // the live read. `getAllModels` is pi-ai 1.x's every-type listing; it must
+    // be overridden too or the host reads the construction-time list.
+    return { ...base, getModels: models, getAllModels: models } as Provider
+  }
+
+  const cnProvider = makeProvider(providerId, cnDisplayName, () => modelsFor(providerId))
+  const globalProvider = makeProvider(globalProviderId, globalDisplayName, () => modelsFor(globalProviderId, 'global'))
+
+  const providers: readonly WorkBuddy2ApiProvider[] = [
+    { id: providerId, displayName: cnDisplayName, region: 'cn' },
+    { id: globalProviderId, displayName: globalDisplayName, region: 'global' },
+  ]
+  const regionByRoute = new Map(providers.map(provider => [provider.id, provider.region]))
+
+  const profileFor = (
+    id: string,
+    name: string,
+    piProvider: Provider,
+  ): ResolvedPiAiProviderProfile => ({
+    provider: id,
+    displayName: name,
     streamIdleTimeoutMs: WORKBUDDY2API_STREAM_IDLE_TIMEOUT_MS,
     retryPolicy: resolveRetryPolicy(undefined, 'dsh-workbuddy2api-connect retryPolicy'),
     configuredMaxTokens: new Map(),
@@ -262,13 +389,28 @@ export function createWorkBuddy2ApiAdapter(options: WorkBuddy2ApiAdapterOptions)
     maxRequestImageBytes: 20_971_520,
     requestImagePixelBudget: 4_194_304,
     requestImageMaxBytes: 1_048_576,
-    piProvider: provider,
+    piProvider,
+  })
+
+  const buildProfiles = (): Map<string, ResolvedPiAiProviderProfile> => new Map([
+    [providerId, profileFor(providerId, cnDisplayName, cnProvider)],
+    [globalProviderId, profileFor(globalProviderId, globalDisplayName, globalProvider)],
+  ])
+
+  let profiles = buildProfiles()
+
+  /** Replace the profile map so `PiAiAdapter` rebuilds its `Models` snapshot. */
+  const invalidate = (): void => {
+    profiles = buildProfiles()
   }
 
-  let profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
-
   const adapter = new PanelPiAiAdapter(
-    { catalog: options.catalog, hidden: options.hidden },
+    {
+      catalog: options.catalog,
+      hidden: options.hidden,
+      regionOfRoute: route => regionByRoute.get(route) ?? 'cn',
+      invalidate,
+    },
     {
       profiles: () => profiles,
       auth: INERT_AUTH,
@@ -282,10 +424,5 @@ export function createWorkBuddy2ApiAdapter(options: WorkBuddy2ApiAdapterOptions)
     },
   )
 
-  return {
-    adapter,
-    invalidate: () => {
-      profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
-    },
-  }
+  return { adapter, providers, invalidate }
 }

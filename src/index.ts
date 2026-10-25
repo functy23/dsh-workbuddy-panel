@@ -34,10 +34,12 @@ import { ModelOverridesStore } from './overrides-store.ts'
 import { ConnectionStore, DEFAULT_CONNECTION } from './settings-store.ts'
 import { PanelClient } from './panel-client.ts'
 import { createWorkBuddy2ApiAdapter, WORKBUDDY2API_PROVIDER } from './adapter.ts'
+import type { WorkBuddy2ApiAdapter } from './adapter.ts'
 import { PanelSupervisor } from './supervisor.ts'
 import { WorkBuddy2ApiService } from './service.ts'
 import { registerGatewayRoutes } from './routes.ts'
 import { WORKBUDDY2API_GATEWAY_VERSION } from './version.ts'
+import { piAiVersionSummary, piAiVersionWarning, resolvedPiAiVersion } from './pi-ai-version.ts'
 import { gatewayConfigPath, gatewayWorkdir, pluginDataDir } from './paths.ts'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -205,9 +207,30 @@ export function apply(ctx: Context, config: Config): void {
 
   /** Route ownership, decided when the llm service is available. */
   let route: RouteState = { id: config.providerId, owned: true }
+  /** The international route, resolved beside the domestic one. */
+  let globalRoute: RouteState = { id: config.providerId + '-global', owned: true }
+
+  /**
+   * The adapter, once the llm service lets us build it.
+   *
+   * The service can discover a model before this is assigned; the optional
+   * call keeps the catalog poller from depending on registration order.
+   */
+  let adapterHandle: WorkBuddy2ApiAdapter | undefined
+
+  const piAiVersion = resolvedPiAiVersion()
+  const piAiWarning = piAiVersionWarning()
+  if (piAiWarning === undefined) {
+    log.info('workbuddy2api-gateway: pi-ai ' + piAiVersionSummary())
+  } else {
+    // Report, do not throw: the settings page is how a user finds out what is
+    // wrong, so taking the plugin down would hide the diagnosis.
+    log.warn(piAiWarning)
+  }
 
   const service = new WorkBuddy2ApiService({
     version: WORKBUDDY2API_GATEWAY_VERSION,
+    ...piAiVersion === undefined ? {} : { piAiVersion },
     providerId: route.id,
     providerOwned: route.owned,
     ...route.conflictWith === undefined ? {} : { conflictWith: route.conflictWith },
@@ -219,6 +242,11 @@ export function apply(ctx: Context, config: Config): void {
       log.warn(message, error)
     },
     onChange: () => {
+      // A changed catalog must also rebuild the adapter's own snapshot: the
+      // host asks that snapshot to resolve a model before it asks the provider
+      // for the live list, and a snapshot built before the model existed
+      // answers UNKNOWN_MODEL until the profile map identity changes.
+      adapterHandle?.invalidate()
       try {
         ctx.emit('llm/adapters-updated')
       } catch (error: unknown) {
@@ -271,6 +299,11 @@ export function apply(ctx: Context, config: Config): void {
   ctx.inject(['llm'], llmCtx => {
     const llm = llmCtx.llm
     route = resolveRoute(llm, config.providerId)
+    globalRoute = resolveRoute(llm, route.id + '-global')
+    service.setProviderRoutes(
+      { id: route.id, owned: route.owned, ...route.conflictWith === undefined ? {} : { conflict: route.conflictWith } },
+      { id: globalRoute.id, owned: globalRoute.owned, ...globalRoute.conflictWith === undefined ? {} : { conflict: globalRoute.conflictWith } },
+    )
     if (!route.owned) {
       log.warn(
         'workbuddy2api-gateway: provider "' + String(route.conflictWith) + '" is already registered by another plugin; ' +
@@ -280,6 +313,7 @@ export function apply(ctx: Context, config: Config): void {
 
     const adapter = createWorkBuddy2ApiAdapter({
       providerId: route.id,
+      globalProviderId: globalRoute.id,
       displayName: config.displayName,
       catalog: () => service.catalogModels(),
       v1BaseUrl: () => client.v1BaseUrl(),
@@ -293,20 +327,24 @@ export function apply(ctx: Context, config: Config): void {
       attachments: () => ctx.get('attachments') as AttachmentStore | undefined,
       imageAccess: imageAccessResolver(ctx),
     })
+    adapterHandle = adapter
 
     try {
-      const releaseDirectory = llm.registerConfigurableProviders([{
-        provider: route.id,
-        displayName: config.displayName,
+      const releaseDirectory = llm.registerConfigurableProviders(adapter.providers.map(provider => ({
+        provider: provider.id,
+        displayName: provider.displayName,
         settingsNs: 'llm-workbuddy2api-gateway',
         settingsPath: [],
-      }])
-      const releaseAdapter = llm.registerAdapter([route.id], adapter.adapter)
+      })))
+      const releaseAdapter = llm.registerAdapter(adapter.providers.map(provider => provider.id), adapter.adapter)
       ctx.effect(() => () => {
         releaseDirectory()
         releaseAdapter()
       }, 'dsh-workbuddy2api-gateway: provider registration')
-      log.info('workbuddy2api-gateway: route "' + route.id + '" registered (' + String(service.catalogModels().length) + ' models)')
+      log.info(
+        'workbuddy2api-gateway: routes ' + adapter.providers.map(provider => provider.id).join(', ') +
+        ' registered (' + String(service.catalogModels().length) + ' models)',
+      )
     } catch (error: unknown) {
       log.error('workbuddy2api-gateway: provider registration failed', error)
     }

@@ -42,7 +42,7 @@ export type ClientAction =
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null }
-  | { action: 'models-all', enabled: boolean }
+  | { action: 'models-all', enabled: boolean, region?: 'cn' | 'global' }
   | { action: 'sync-hidden' }
   | { action: 'login-start', realm: 'cn' | 'global' }
   | { action: 'login-poll', state: string }

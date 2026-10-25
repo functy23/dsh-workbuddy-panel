@@ -2,7 +2,7 @@
   "name": "dsh-workbuddy-panel",
   "displayName": "DSH WorkBuddy Panel",
   "description": "把 workbuddy2api 网关托管进 DSH：插件自己拉起并监督上游进程，账号、模型目录与思考档位全部在 DSH 内管理，不打开面板网页。",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "Functy",
   "keywords": [
     "dsh-plugin",
@@ -46,6 +46,9 @@
     "locale"
   ],
   "license": "MIT",
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.87.1"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -80,7 +83,6 @@
     "@deepseek-ai/dsh-llm-pi-ai": "^0.1.7-alpha.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-settings": "^0.1.7-alpha.1 || ^0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.3",
-    "@earendil-works/pi-ai": "^0.85.1 || ^0.87.1",
     "react": "^18.2.0"
   },
   "devDependencies": {
@@ -100,7 +102,6 @@
     "@deepseek-ai/dsh-llm-pi-ai": "0.2.0-rc.2",
     "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
-    "@earendil-works/pi-ai": "^0.87.1",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.7",

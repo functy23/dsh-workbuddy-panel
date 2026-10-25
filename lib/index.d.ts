@@ -246,10 +246,14 @@ interface ModelOverride {
    */
   efforts?: readonly ThinkingLevel[];
 }
+/** Which WorkBuddy gateway a model id belongs to. */
+type ModelRegion = 'cn' | 'global';
 /** One model after the override layer is applied. */
 interface CatalogModel {
   id: string;
   name: string;
+  /** Gateway realm this model is served by. */
+  region: ModelRegion;
   description?: string;
   vendor?: string;
   credits?: string;
@@ -589,6 +593,8 @@ interface WebAccount {
 interface WebModel {
   id: string;
   name: string;
+  /** Gateway realm, so the page can group domestic and international rows. */
+  region: 'cn' | 'global';
   description?: string;
   vendor?: string;
   credits?: string;
@@ -619,14 +625,20 @@ interface WebSync {
   /** Whether a new model joins the DSH picker without asking. */
   autoRegister: boolean;
 }
+/** One provider route's ownership, as the host resolved it. */
+interface ProviderRouteState {
+  id: string;
+  owned: boolean;
+  conflict?: string;
+}
 /** Everything the browser surfaces render. */
 interface WebStatus {
   ok: true;
   version: string;
-  provider: {
-    id: string;
-    owned: boolean;
-    conflict?: string;
+  /** The pi-ai copy this plugin loaded, for cross-generation support reports. */
+  piAiVersion?: string;
+  provider: ProviderRouteState & {
+    global: ProviderRouteState;
   };
   connection: {
     panelUrl: string;
@@ -682,9 +694,15 @@ interface ActionOutcome {
 /** Dependencies the service reads. */
 interface WorkBuddy2ApiServiceOptions {
   version: string;
+  /** Resolved `@earendil-works/pi-ai` version; read once at startup. */
+  piAiVersion?: string;
   providerId: string;
   providerOwned: boolean;
   conflictWith?: string;
+  /** International route; defaults to `<providerId>-global`. */
+  globalProviderId?: string;
+  globalProviderOwned?: boolean;
+  globalConflictWith?: string;
   connection: ConnectionStore;
   overrides: ModelOverridesStore;
   client: PanelClient;
@@ -710,8 +728,13 @@ declare class WorkBuddy2ApiService {
   private clientProbe;
   private usageCache?;
   private inFlight?;
+  private emptyModelReads;
   private disposed;
+  /** Provider ownership, refreshed once the llm service resolves both routes. */
+  private routes;
   constructor(options: WorkBuddy2ApiServiceOptions);
+  /** Publish the routes the host actually allowed after adapter registration. */
+  setProviderRoutes(cn: ProviderRouteState, global: ProviderRouteState): void;
   /** The cache document this plugin writes. */
   private get cachePath();
   /** Load the last catalog so a cold boot has models before the first poll. */
@@ -767,8 +790,8 @@ declare class WorkBuddy2ApiService {
     effort?: ThinkingLevel | null;
     efforts?: readonly ThinkingLevel[];
   }): Promise<ActionOutcome>;
-  /** Enable or disable every model at once. */
-  setAllModels(enabled: boolean): Promise<ActionOutcome>;
+  /** Enable or disable every model, or one realm's models, at once. */
+  setAllModels(enabled: boolean, region?: 'cn' | 'global'): Promise<ActionOutcome>;
   /** Write the locally hidden models into the gateway's own hidden list. */
   syncHidden(): Promise<ActionOutcome>;
   /** Begin an account add; the gateway owns the OAuth flow. */
@@ -804,10 +827,14 @@ declare class WorkBuddy2ApiService {
 declare const WORKBUDDY2API_PROVIDER = "workbuddy2api";
 /** Constructor dependencies. */
 interface WorkBuddy2ApiAdapterOptions {
-  /** Provider route; defaults to {@link WORKBUDDY2API_PROVIDER}. */
+  /** Domestic provider route; defaults to {@link WORKBUDDY2API_PROVIDER}. */
   providerId?: string;
-  /** Name the picker shows for the group. */
+  /** International provider route; defaults to `<providerId>-global`. */
+  globalProviderId?: string;
+  /** Base name the picker shows; the two groups append ` · CN` / ` · Global`. */
   displayName?: string;
+  /** Override for the international group's display name. */
+  globalDisplayName?: string;
   /** Live catalog read; called on every listing and resolution. */
   catalog: () => readonly CatalogModel[];
   /** The panel's `/v1` origin, re-read per request so a URL change applies. */
@@ -816,6 +843,14 @@ interface WorkBuddy2ApiAdapterOptions {
   apiKey: () => string;
   /** Model ids the local overrides hide from the picker. */
   hidden: () => readonly string[];
+  /**
+   * Rebuild the host-side adapter snapshot after a catalog change.
+   *
+   * `PiAiAdapter` memoizes one `Models` collection per profile map identity, so
+   * a route whose model list grew can keep answering `UNKNOWN_MODEL` until the
+   * map is replaced. The service calls this whenever its diff finds a change.
+   */
+  invalidate?: () => void;
   /**
    * The host's durable attachment service, read per request.
    *
@@ -828,9 +863,17 @@ interface WorkBuddy2ApiAdapterOptions {
   /** Bridge one durable reference into the current tool execution world. */
   imageAccess?: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined;
 }
+/** One provider group the adapter registers with the host. */
+interface WorkBuddy2ApiProvider {
+  id: string;
+  displayName: string;
+  region: ModelRegion;
+}
 /** What {@link createWorkBuddy2ApiAdapter} hands back. */
 interface WorkBuddy2ApiAdapter {
   adapter: PiAiAdapter;
+  /** The two picker groups, domestic first. */
+  providers: readonly WorkBuddy2ApiProvider[];
   /** Announce a catalog change so the pickers re-read their lists. */
   invalidate: () => void;
 }
@@ -879,6 +922,7 @@ type GatewayAction = {
 } | {
   action: 'models-all';
   enabled: boolean;
+  region?: 'cn' | 'global';
 } | {
   action: 'sync-hidden';
 } | {

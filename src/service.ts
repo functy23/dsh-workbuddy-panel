@@ -25,7 +25,7 @@ import { catalogCachePath, gatewayUsagePath } from './paths.ts'
 import { readUsage } from './usage.ts'
 import type { UsageSummary } from './usage.ts'
 import { readStoreDocument, writeStoreDocument } from './store-file.ts'
-import { buildCatalog, hiddenIds, panelHiddenList, isThinkingLevel } from './catalog.ts'
+import { buildCatalog, hiddenIds, panelHiddenList, isThinkingLevel, regionOfModel } from './catalog.ts'
 import type { CatalogModel, ModelOverride, ThinkingLevel } from './catalog.ts'
 import type { ModelOverridesStore } from './overrides-store.ts'
 import type { ConnectionSettings, ConnectionStore } from './settings-store.ts'
@@ -64,6 +64,8 @@ export interface WebAccount {
 export interface WebModel {
   id: string
   name: string
+  /** Gateway realm, so the page can group domestic and international rows. */
+  region: 'cn' | 'global'
   description?: string
   vendor?: string
   credits?: string
@@ -97,11 +99,20 @@ export interface WebSync {
   autoRegister: boolean
 }
 
+/** One provider route's ownership, as the host resolved it. */
+export interface ProviderRouteState {
+  id: string
+  owned: boolean
+  conflict?: string
+}
+
 /** Everything the browser surfaces render. */
 export interface WebStatus {
   ok: true
   version: string
-  provider: { id: string, owned: boolean, conflict?: string }
+  /** The pi-ai copy this plugin loaded, for cross-generation support reports. */
+  piAiVersion?: string
+  provider: ProviderRouteState & { global: ProviderRouteState }
   connection: {
     panelUrl: string
     hasApiKey: boolean
@@ -159,9 +170,15 @@ export interface ActionOutcome {
 /** Dependencies the service reads. */
 export interface WorkBuddy2ApiServiceOptions {
   version: string
+  /** Resolved `@earendil-works/pi-ai` version; read once at startup. */
+  piAiVersion?: string
   providerId: string
   providerOwned: boolean
   conflictWith?: string
+  /** International route; defaults to `<providerId>-global`. */
+  globalProviderId?: string
+  globalProviderOwned?: boolean
+  globalConflictWith?: string
   connection: ConnectionStore
   overrides: ModelOverridesStore
   client: PanelClient
@@ -209,6 +226,7 @@ export function webModel(model: CatalogModel): WebModel {
   return {
     id: model.id,
     name: model.name,
+    region: model.region,
     ...model.description === undefined ? {} : { description: model.description },
     ...model.vendor === undefined ? {} : { vendor: model.vendor },
     ...model.credits === undefined ? {} : { credits: model.credits },
@@ -230,6 +248,7 @@ function fingerprint(model: CatalogModel): string {
   return [
     model.id,
     model.name,
+    model.region,
     String(model.contextLength),
     String(model.maxOutputTokens),
     model.efforts.join(','),
@@ -265,11 +284,31 @@ export class WorkBuddy2ApiService {
   private clientProbe: WebClientProbe = {}
   private usageCache?: { at: number, summary: UsageSummary }
   private inFlight?: Promise<void>
+  private emptyModelReads = 0
   private disposed = false
+  /** Provider ownership, refreshed once the llm service resolves both routes. */
+  private routes: { cn: ProviderRouteState, global: ProviderRouteState }
 
   constructor(private readonly options: WorkBuddy2ApiServiceOptions) {
     this.sync = { added: [], removed: [], changed: [], autoRegister: true }
+    this.routes = {
+      cn: {
+        id: options.providerId,
+        owned: options.providerOwned,
+        ...options.conflictWith === undefined ? {} : { conflict: options.conflictWith },
+      },
+      global: {
+        id: options.globalProviderId ?? options.providerId + '-global',
+        owned: options.globalProviderOwned ?? true,
+        ...options.globalConflictWith === undefined ? {} : { conflict: options.globalConflictWith },
+      },
+    }
     this.restore()
+  }
+
+  /** Publish the routes the host actually allowed after adapter registration. */
+  setProviderRoutes(cn: ProviderRouteState, global: ProviderRouteState): void {
+    this.routes = { cn, global }
   }
 
   /** The cache document this plugin writes. */
@@ -284,7 +323,11 @@ export class WorkBuddy2ApiService {
       updatedAt: typeof document['updatedAt'] === 'string' ? document['updatedAt'] : undefined,
     }))
     if (stored?.models === undefined) return
-    const catalog = stored.models.filter(entry => typeof entry?.id === 'string')
+    // A cache written before `region` existed still has usable ids: derive the
+    // realm instead of discarding a perfectly good cold-boot catalog.
+    const catalog = stored.models
+      .filter(entry => typeof entry?.id === 'string')
+      .map(entry => ({ ...entry, region: entry.region === 'global' ? 'global' : regionOfModel(entry.id) }))
     if (catalog.length === 0) return
     this.catalog = catalog
     if (stored.updatedAt !== undefined) this.sync = { ...this.sync, lastSyncedAt: stored.updatedAt }
@@ -351,6 +394,19 @@ export class WorkBuddy2ApiService {
 
   /** Diff the gateway's catalog against ours and publish the difference. */
   private merge(models: readonly PanelModel[]): void {
+    // A gateway that is still booting can answer 200 with an empty model list.
+    // Treating that as the truth would empty the picker and make every model a
+    // running session still holds unresolvable, so keep the last catalog for a
+    // few reads; a gateway that really has no models is followed after that.
+    if (models.length === 0 && this.catalog.length > 0 && (this.snapshot.overview?.total ?? 0) > 0) {
+      this.emptyModelReads += 1
+      if (this.emptyModelReads < 3) {
+        this.snapshot = { ...this.snapshot, error: 'gateway reported no models; keeping the previous catalog' }
+        return
+      }
+    } else if (models.length > 0) {
+      this.emptyModelReads = 0
+    }
     const overrides = this.options.overrides.all()
     const previous = new Map(this.catalog.map(model => [model.id, model]))
     const merged = buildCatalog(models, overrides)
@@ -430,10 +486,10 @@ export class WorkBuddy2ApiService {
     return {
       ok: true,
       version: this.options.version,
+      ...this.options.piAiVersion === undefined ? {} : { piAiVersion: this.options.piAiVersion },
       provider: {
-        id: this.options.providerId,
-        owned: this.options.providerOwned,
-        ...this.options.conflictWith === undefined ? {} : { conflict: this.options.conflictWith },
+        ...this.routes.cn,
+        global: { ...this.routes.global },
       },
       connection: {
         panelUrl: connection.panelUrl,
@@ -569,9 +625,10 @@ export class WorkBuddy2ApiService {
     return { ok: true, status: this.status() }
   }
 
-  /** Enable or disable every model at once. */
-  async setAllModels(enabled: boolean): Promise<ActionOutcome> {
-    this.options.overrides.setAll(this.catalog, enabled)
+  /** Enable or disable every model, or one realm's models, at once. */
+  async setAllModels(enabled: boolean, region?: 'cn' | 'global'): Promise<ActionOutcome> {
+    const target = region === undefined ? this.catalog : this.catalog.filter(model => model.region === region)
+    this.options.overrides.setAll(target, enabled)
     this.merge(this.snapshot.models)
     this.options.onChange?.()
     return { ok: true, status: this.status() }

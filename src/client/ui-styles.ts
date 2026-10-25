@@ -215,6 +215,9 @@ export const PAGE_CSS = `
 .wb2-usageStatSub{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Tabs across the top of the page: one per product. */
 /* --------------------------------------------------------------- models */
+/* Realm heading between model rows: domestic block first, international second. */
+.wb2-modelGroup{align-items:center;gap:8px;display:flex;margin:16px 0 2px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:600;line-height:18px}
+.wb2-modelGroup:first-child{margin-top:4px}
 .wb2-modelRow{align-items:center;gap:8px;display:flex;padding:10px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
 /* The row's left half: the mark, the name, its promotions and its rate. Grows to take the space the fixed control column leaves. */
 .wb2-modelMain{align-items:center;gap:8px;display:flex;flex:1;min-width:0}

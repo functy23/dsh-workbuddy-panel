@@ -152,6 +152,39 @@ describe('service discovery', () => {
     expect(service.status().sync.added).toEqual([])
   })
 
+  it('classifies domestic and international models and orders domestic first', async () => {
+    const service = makeService(async () => [model('global:gpt'), model('cn:hy3'), model('global:kimi')])
+    await service.refresh()
+    const status = service.status()
+    expect(status.models.map(entry => entry.id)).toEqual(['cn:hy3', 'global:gpt', 'global:kimi'])
+    expect(status.models.map(entry => entry.region)).toEqual(['cn', 'global', 'global'])
+  })
+
+  it('scopes bulk enable and disable to one realm', async () => {
+    const service = makeService(async () => [model('cn:a'), model('global:b')])
+    await service.refresh()
+    await service.setAllModels(false, 'cn')
+    let status = service.status()
+    expect(status.models.find(entry => entry.id === 'cn:a')?.enabled).toBe(false)
+    expect(status.models.find(entry => entry.id === 'global:b')?.enabled).toBe(true)
+    await service.setAllModels(true, 'cn')
+    status = service.status()
+    expect(status.models.find(entry => entry.id === 'cn:a')?.enabled).toBe(true)
+  })
+
+  it('keeps the previous catalog through a transient empty read', async () => {
+    let models: PanelModel[] = [model('cn:a'), model('global:b')]
+    const service = makeService(async () => models)
+    await service.refresh()
+    models = []
+    await service.refresh()
+    expect(service.catalogModels().map(entry => entry.id)).toEqual(['cn:a', 'global:b'])
+    expect(service.status().error).toContain('keeping the previous catalog')
+    await service.refresh()
+    await service.refresh()
+    expect(service.catalogModels()).toEqual([])
+  })
+
   it('reports the pool and the reasoning levels the panel declares', async () => {
     const service = makeService(async () => [model('cn:a', 'A', ['off', 'high', 'max'])])
     await service.refresh()

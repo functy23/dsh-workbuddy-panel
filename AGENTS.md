@@ -32,13 +32,13 @@
 
 0. **二进制只有一个来源**：`bin/workbuddy2api`。不要恢复 PATH / 目录探测或"可配置路径"；要换版本就重新编译并覆盖 `bin/`，提交信息写清来源。
 1. **upstream/ 是只读快照**：不要在那里改网关逻辑。
-
-1. **不碰宿主**：不修改 DSH 的安装目录、不 patch 宿主 bundle。宿主没给的位（比如设置导航图标）用"打标记 + 自己的 CSS"实现。
-2. **不引运行时依赖**：QR 编码器是手写的（`qr-code.ts`），不要换成 npm 包；UI 原子来自宿主 seed 模块。
-3. **一个事实一个来源**：进程状态只在 `supervisor`，目录只在 `service`，UI 只读 `status()`，不要在组件里自己算业务状态。
-4. **失败要保留上一份数据**：网关读失败时目录不能清空（正在跑的会话依赖它）。
-5. **所有写操作走 `action` 路由**，带 controlKey；`status` 保持只读。
-6. **文案**：中文与英文同时加进 `client/copy.ts`（`ZH` 与 `EN` 键必须一一对应），不要硬编码中文。
+2. **不碰宿主**：不修改 DSH 的安装目录、不 patch 宿主 bundle。宿主没给的位（比如设置导航图标）用"打标记 + 自己的 CSS"实现。
+3. **不引运行时依赖**：QR 编码器是手写的（`qr-code.ts`），不要换成 npm 包；UI 原子来自宿主 seed 模块。唯一例外见下一条。
+4. **pi-ai 必须自带，不许退回 peer**：`@earendil-works/pi-ai` 在 `dependencies` 里**精确钉死**一个版本。peer-only 在 `nodeLinker: hoisted` + `autoInstallPeers: false` 的 profile 里没有自己的依赖边，会解析到别的插件留在根目录的旧副本——`0.82.1` 那次 `PI_AI_ERROR` 就是这么来的（`estimateMessageTokens` 没有 `system` 分支）。换代际只改 `package.json` 里那一个版本号；`src/pi-ai-version.ts` 的 `MIN_PI_AI_VERSION` 是最低可运行代际，不是钉的版本。
+5. **一个事实一个来源**：进程状态只在 `supervisor`，目录只在 `service`，UI 只读 `status()`，不要在组件里自己算业务状态。
+6. **失败要保留上一份数据**：网关读失败时目录不能清空（正在跑的会话依赖它）。
+7. **所有写操作走 `action` 路由**，带 controlKey；`status` 保持只读。
+8. **文案**：中文与英文同时加进 `client/copy.ts`（`ZH` 与 `EN` 键必须一一对应），不要硬编码中文。
 
 ## 视觉约定
 

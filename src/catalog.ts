@@ -37,10 +37,26 @@ export interface ModelOverride {
   efforts?: readonly ThinkingLevel[]
 }
 
+/** Which WorkBuddy gateway a model id belongs to. */
+export type ModelRegion = 'cn' | 'global'
+
+/**
+ * The region encoded in a gateway model id.
+ *
+ * `/v1/models` and `/panel/api/models` prefix every id with the realm that
+ * serves it (`cn:` or `global:`). A bare id is the CN realm: that is the
+ * gateway's own default and the historical shape before the prefix existed.
+ */
+export function regionOfModel(id: string): ModelRegion {
+  return id.startsWith('global:') ? 'global' : 'cn'
+}
+
 /** One model after the override layer is applied. */
 export interface CatalogModel {
   id: string
   name: string
+  /** Gateway realm this model is served by. */
+  region: ModelRegion
   description?: string
   vendor?: string
   credits?: string
@@ -104,6 +120,7 @@ export function buildCatalog(
     return {
       id: model.id,
       name: model.name,
+      region: regionOfModel(model.id),
       ...model.description === undefined ? {} : { description: model.description },
       ...model.vendor === undefined ? {} : { vendor: model.vendor },
       ...model.credits === undefined ? {} : { credits: model.credits },
@@ -121,9 +138,20 @@ export function buildCatalog(
     }
   })
   // The gateway serves /panel/api/models out of a Go map, so its order changes on
-  // every request. Sorting here is what keeps the picker's rows still: id order,
-  // which also groups a realm's models together because the id is realm-prefixed.
-  return built.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  // every request. Sorting here is what keeps the picker's rows still: realm
+  // first (domestic before international), then id. The id is realm-prefixed, so
+  // the second key already keeps a realm together — the first key is what makes
+  // the two blocks explicit when a catalog is displayed as one list.
+  return built.sort((left, right) => {
+    const rank = regionRank(left.region) - regionRank(right.region)
+    if (rank !== 0) return rank
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  })
+}
+
+/** Display order of the two realms: domestic first, international second. */
+function regionRank(region: ModelRegion): number {
+  return region === 'cn' ? 0 : 1
 }
 
 /** Ids the user has hidden locally — what the picker filters out. */

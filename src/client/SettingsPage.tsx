@@ -184,7 +184,15 @@ export function WorkBuddy2ApiSettingsPage(props: SettingsPageProps): ReactElemen
         <Badge tone={document.provider.owned ? 'muted' : 'warn'}>
           {document.provider.owned ? t('routeOwned', document.provider.id) : t('routeFallback', document.provider.id)}
         </Badge>
+        {document.provider.global === undefined ? null : (
+          <Badge tone={document.provider.global.owned ? 'muted' : 'warn'}>
+            {document.provider.global.owned
+              ? t('routeOwned', document.provider.global.id)
+              : t('routeFallback', document.provider.global.id)}
+          </Badge>
+        )}
         <Badge tone="muted">{t('versionLine', document.version)}</Badge>
+        {document.piAiVersion === undefined ? null : <Badge tone="muted">{t('piAiVersion', document.piAiVersion)}</Badge>}
         <span className="wb2-hint">
           {document.updatedAt === undefined ? t('neverUpdated') : t('lastUpdated', relativeTime(document.updatedAt))}
         </span>
@@ -601,14 +609,25 @@ function ModelsTab(props: {
   const [query, setQuery] = useState('')
   const models: readonly WebModel[] = document.models
   const [filter, setFilter] = useState<'all' | 'checked'>('all')
+  // The gateway serves both realms in one catalog; the tab is the page's realm
+  // filter, matching the two provider groups the picker shows. An unknown realm
+  // falls into the domestic side, matching the catalog's own default.
+  const regionOf = (model: WebModel): 'cn' | 'global' =>
+    model.region ?? (model.id.startsWith('global:') ? 'global' : 'cn')
+  const [region, setRegion] = useState<'cn' | 'global'>('cn')
+  const regionCounts = {
+    cn: models.filter(model => regionOf(model) === 'cn').length,
+    global: models.filter(model => regionOf(model) === 'global').length,
+  }
+  const regionModels = models.filter(model => regionOf(model) === region)
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return models.filter(model => {
+    return regionModels.filter(model => {
       if (filter === 'checked' && !model.enabled) return false
       if (needle === '') return true
       return model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle)
     })
-  }, [models, query, filter])
+  }, [regionModels, query, filter])
   const busy = pending !== undefined
   const added = new Set(document.sync.added)
   const changed = new Set(document.sync.changed)
@@ -651,6 +670,15 @@ function ModelsTab(props: {
           </>
         )}
       >
+        <SegmentedField
+          label={t('regionFilter')}
+          value={region}
+          onChange={(value) => { setRegion(value === 'global' ? 'global' : 'cn') }}
+          options={[
+            { value: 'cn', label: t('regionCn') + ' (' + String(regionCounts.cn) + ')' },
+            { value: 'global', label: t('regionGlobal') + ' (' + String(regionCounts.global) + ')' },
+          ]}
+        />
         <SettingRow
           title={t('autoRegister')}
           titleFor="wb2-auto-register"
@@ -671,12 +699,12 @@ function ModelsTab(props: {
           )}
         />
         <div className="cs-cardActions">
-          <ActionButton label={t('enableAll')} disabled={busy} onClick={() => { void store.act({ action: 'models-all', enabled: true }) }} />
-          <ActionButton label={t('disableAll')} disabled={busy} onClick={() => { void store.act({ action: 'models-all', enabled: false }) }} />
+          <ActionButton label={t('enableAll')} disabled={busy} onClick={() => { void store.act({ action: 'models-all', enabled: true, region }) }} />
+          <ActionButton label={t('disableAll')} disabled={busy} onClick={() => { void store.act({ action: 'models-all', enabled: false, region }) }} />
           <ActionButton label={t('syncHidden')} disabled={busy} onClick={() => { void store.act({ action: 'sync-hidden' }) }} />
         </div>
         {filtered.length === 0
-          ? <p className="wb2-hint">{t('searchPlaceholder')}</p>
+          ? <p className="wb2-hint">{regionModels.length === 0 ? t('regionEmpty') : t('searchPlaceholder')}</p>
           : filtered.map(model => (
             <SettingRow
               key={model.id}

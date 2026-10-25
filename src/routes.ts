@@ -57,7 +57,7 @@ export type GatewayAction =
   | { action: 'connection', panelUrl?: string, apiKey?: string, refreshSeconds?: number, syncHiddenToPanel?: boolean }
   | { action: 'auto-register', enabled: boolean }
   | { action: 'model', id: string, enabled?: boolean, effort?: ThinkingLevel | null, efforts?: readonly ThinkingLevel[] }
-  | { action: 'models-all', enabled: boolean }
+  | { action: 'models-all', enabled: boolean, region?: 'cn' | 'global' }
   | { action: 'sync-hidden' }
   | { action: 'login-start', realm: 'cn' | 'global' }
   | { action: 'login-poll', state: string }
@@ -159,8 +159,11 @@ export function parseAction(text: string): GatewayAction | undefined {
         ...efforts === undefined ? {} : { efforts },
       }
     }
-    case 'models-all':
-      return typeof body['enabled'] === 'boolean' ? { action: 'models-all', enabled: body['enabled'] } : undefined
+    case 'models-all': {
+      if (typeof body['enabled'] !== 'boolean') return undefined
+      const region = body['region'] === 'global' ? 'global' : body['region'] === 'cn' ? 'cn' : undefined
+      return { action: 'models-all', enabled: body['enabled'], ...region === undefined ? {} : { region } }
+    }
     case 'sync-hidden': return { action: 'sync-hidden' }
     case 'login-start': {
       const realm = body['realm'] === 'global' ? 'global' : body['realm'] === 'cn' ? 'cn' : undefined
@@ -280,7 +283,7 @@ export async function runAction(service: WorkBuddy2ApiService, action: GatewayAc
         ...action.efforts === undefined ? {} : { efforts: action.efforts },
       })
     case 'models-all':
-      return service.setAllModels(action.enabled)
+      return service.setAllModels(action.enabled, action.region)
     case 'sync-hidden':
       return service.syncHidden()
     case 'login-start':
