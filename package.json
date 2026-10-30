@@ -2,7 +2,7 @@
   "name": "dsh-workbuddy-panel",
   "displayName": "DSH WorkBuddy Panel",
   "description": "把 workbuddy2api 网关托管进 DSH：面板与内核分离，服务端单独下载，宿主组合行通过 ctx.subprocess 托管进程；账号、模型目录与思考档位全部在 DSH 内管理。",
-  "version": "0.5.1",
+  "version": "0.5.0",
   "author": "Functy",
   "keywords": [
     "dsh-plugin",
