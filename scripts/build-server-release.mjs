@@ -77,9 +77,16 @@ const manifest = {
 }
 const document = JSON.stringify(manifest, null, 2) + '\n'
 writeFileSync(new URL('../server.json', import.meta.url), document, 'utf8')
-// The release must ALSO carry the manifest as an asset: that is how the panel's
-// "check for updates" discovers a newer kernel without a panel release.
+// Two copies leave this directory, and they are not the same thing:
+//   dist/server.json            → asset of THIS release (audit trail per version)
+//   server-channel/server.json  → the fixed-URL channel document the panel reads.
+// The channel document is a release asset on the permanent tag `server-channel`;
+// overwriting it in place is what makes discovery version-free and API-free.
 writeFileSync(join(dist, 'server.json'), document, 'utf8')
 console.log('wrote server.json with ' + Object.keys(assets).length + ' assets')
-console.log('upload dist/server.json together with the .gz assets:')
+console.log('')
+console.log('1) publish the versioned release:')
 console.log('  gh release create server-v' + version + ' dist/workbuddy2api-' + version + '-*.gz dist/server.json ...')
+console.log('2) overwrite the fixed channel document (same URL for every version):')
+console.log('  gh release upload server-channel dist/server.json --clobber')
+console.log('   → ' + manifest.releaseBaseUrl + '/server-channel/server.json')

@@ -13,7 +13,10 @@
 **面板 · DSH 集成**
 
 - **面板 / 内核分离**：面板包约 0.1MB，只带 UI、目录、路由、pi-ai provider 和 `server.json` 清单，不含网关二进制；网关本体是独立的 GitHub Release 资产（gzip ≈4MB，安装 ≈10MB），按清单里的 SHA-256 校验后落盘。
-- **内核独立更新**：设置页「网关进程 → 内核更新」向 Release 通道查新版本（每小时 / 永不），点「安装内核」即下载、校验、落盘，下次启动接管，**不必等面板发版**。
+- **内核独立更新**：设置页「网关进程 → 内核更新」每小时（或手动）检查，点「安装内核」即下载、校验、落盘，下次启动接管，**不必等面板发版**。
+- **渠道是一份固定 URL 的静态清单**（对齐 Sparkle appcast 的做法，不列 GitHub API）：
+  `https://github.com/functy23/dsh-workbuddy-panel/releases/download/server-channel/server.json`。
+  检查更新只发一个 GET，不碰 `api.github.com`，所以不会被匿名配额（60 次/小时/IP）打成 403；发新内核时 `gh release upload server-channel dist/server.json --clobber` 覆盖同一个 URL 即可。自建镜像可用 host row 的 `manifestUrl` 指向自己的清单。
 - **宿主托管进程**：host gateway row 通过 `ctx.subprocess` 启动 / 停止 / 重启，崩溃退避重启、日志可见；面板行重载不影响网关，外部已启动的网关照常接管（停止需回原启动处）。
 - **模型目录自动发现**：轮询时与上一份 diff（新增 / 移除 / 变更），新模型自动进入选择器，思考档位一并带入；读取失败保留上一份目录。
 - **国内 / 国际双分组**：按 `cn:` / `global:` 前缀拆成 `WorkBuddy2API · CN` 与 `WorkBuddy2API · Global` 两个 provider，各自只列本域模型，模型名不带前缀。

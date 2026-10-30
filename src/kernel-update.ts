@@ -1,17 +1,25 @@
 /**
  * Remote kernel discovery.
  *
- * The panel ships a pinned `server.json`, but the gateway can also be updated
- * without republishing the panel: GitHub Releases is the channel, and the
- * **manifest itself** is published as a release asset next to the binaries. This
- * module only *discovers* a newer manifest — it never installs anything. The
- * download path is unchanged: gzip → size → SHA-256 → atomic rename, so a
- * corrupted or substituted asset still fails locally.
+ * 渠道形式对齐 Swift-Craft-Launcher 的 appcast：**一个固定 URL 的静态清单**，
+ * 不列 GitHub Releases API。
  *
- * Trust boundary: the manifest names the version and the per-platform digests.
- * Whoever can publish a release can therefore publish a different binary, so the
- * channel is pinned to one HTTPS origin derived from the packaged
- * `releaseBaseUrl`; a mirror cannot redirect discovery.
+ * - 清单就是打包用的 \`server.json\`（版本 + 每平台 SHA-256 + 大小），发布在固定
+ *   tag \`server-channel\` 的 release 资产上，URL 永远不变：
+ *     https://github.com/<owner>/<repo>/releases/download/server-channel/server.json
+ * - 每次发内核只要 \`gh release upload server-channel dist/server.json --clobber\`：
+ *   URL 不变，面板不需要跟着发版。
+ * - 为什么不用 API：\`/repos/.../releases\` 的匿名配额是 60 次/小时/IP，共享出口
+ *   （代理、公司网）很容易被打满，一打满就是 HTTP 403，检查更新直接失败；静态
+ *   资产 URL 走 github.com 的普通下载路径，不吃配额，也不受 releases 分页、
+ *   草稿/预发布状态影响。
+ *
+ * 这个模块只**发现**清单，不安装任何东西：下载仍然走 gzip → 大小 → SHA-256 →
+ * 原子 rename，所以被替换或损坏的资产在本地照样失败。
+ *
+ * 信任边界：清单声明版本与每平台摘要。能发布清单的人就能发布别的二进制，所以
+ * 默认渠道的 origin 由打包的 \`releaseBaseUrl\` 推出，清单里的 \`releaseBaseUrl\`
+ * 必须与它一致；镜像（\`serverBaseUrl\`）不能把发现重定向到别的仓库。
  *
  * @module dsh-workbuddy-panel/kernel-update
  */
@@ -28,13 +36,13 @@ export function isKernelCadence(value: unknown): value is KernelCheckCadence {
   return value === 'hourly' || value === 'never'
 }
 
-/** The release tag prefix the kernel channel uses. */
-const TAG_PREFIX = 'server-v'
+/** 渠道清单所在的固定 tag：不是版本号，发布新内核时也不变。 */
+export const CHANNEL_TAG = 'server-channel'
 
-/** GitHub caps `per_page` at 100; 30 releases is far more than this channel needs. */
-const RELEASE_PAGE_SIZE = 30
+/** The manifest asset every kernel release carries next to the binaries. */
+export const MANIFEST_ASSET = 'server.json'
 
-/** Compare two `x.y.z[-suffix]` versions. Positive when `a` is newer. */
+/** Compare two \`x.y.z[-suffix]\` versions. Positive when \`a\` is newer. */
 export function compareVersions(a: string, b: string): number {
   const [aCore = '', aSuffix = ''] = splitVersion(a)
   const [bCore = '', bSuffix = ''] = splitVersion(b)
@@ -53,14 +61,14 @@ export function compareVersions(a: string, b: string): number {
   return aSuffix > bSuffix ? 1 : -1
 }
 
-/** Split `1.2.3-panel` into `['1.2.3', 'panel']`. */
+/** Split \`1.2.3-panel\` into \`['1.2.3', 'panel']\`. */
 function splitVersion(version: string): [string, string] {
   const trimmed = version.trim()
   const dash = trimmed.indexOf('-')
   return dash < 0 ? [trimmed, ''] : [trimmed.slice(0, dash), trimmed.slice(dash + 1)]
 }
 
-/** Derive `owner/repo` from a GitHub release base URL. */
+/** Derive \`owner/repo\` from a GitHub release base URL. */
 export function githubRepoFromBase(baseUrl: string): { owner: string, repo: string } | undefined {
   try {
     const url = new URL(baseUrl)
@@ -75,15 +83,24 @@ export function githubRepoFromBase(baseUrl: string): { owner: string, repo: stri
   }
 }
 
-/** The manifest asset every kernel release carries next to the binaries. */
-export const MANIFEST_ASSET = 'server.json'
+/**
+ * 由打包的 release base 推出渠道清单的固定 URL。
+ *
+ * \`.../releases/download\` → \`.../releases/download/server-channel/server.json\`。
+ * 非 GitHub release base 返回 undefined（自建镜像请用 \`manifestUrl\` 显式指定）。
+ */
+export function channelManifestUrl(releaseBaseUrl: string): string | undefined {
+  const base = releaseBaseUrl.trim().replace(/\/+$/u, '')
+  if (base === '' || githubRepoFromBase(base) === undefined) return undefined
+  return base + '/' + CHANNEL_TAG + '/' + MANIFEST_ASSET
+}
 
 /** Discovery inputs. */
 export interface KernelDiscoveryOptions {
   fetchImpl: typeof fetch
-  /** The packaged release base; the channel is derived from it. */
+  /** 打包的 release base；默认渠道由它推出。 */
   releaseBaseUrl: string
-  /** Explicit channel document (overrides discovery when non-empty). */
+  /** 显式渠道文档（自建镜像 / 私有分发），非空时优先。 */
   manifestUrl?: string
   signal?: AbortSignal
 }
@@ -91,87 +108,34 @@ export interface KernelDiscoveryOptions {
 /**
  * Fetch the newest published kernel manifest.
  *
- * With `manifestUrl` set the document is read directly (a user-hosted channel).
- * Otherwise the newest non-draft `server-v*` release is located through the
- * GitHub API and its `server.json` asset is read. Both paths validate the
- * document with the same parser the packaged manifest uses.
+ * 默认只发一个 GET：固定 URL 的渠道清单（见 {@link channelManifestUrl}）。
+ * 不请求 api.github.com，所以不存在匿名配额与 403 的问题。
+ *
+ * \`manifestUrl\` 非空时改读该文档（自建镜像用），此时不再把清单里的
+ * \`releaseBaseUrl\` 钉到打包值上——镜像运维方自己负责。
  */
 export async function fetchLatestServerManifest(options: KernelDiscoveryOptions): Promise<ServerManifest> {
-  const { fetchImpl } = options
-  const manifestUrl = options.manifestUrl?.trim() ?? ''
-  if (manifestUrl !== '') {
-    const raw = await readJson(fetchImpl, manifestUrl, options.signal)
-    const manifest = parseServerManifest(raw)
-    assertChannel(manifest)
-    return manifest
-  }
-  const repo = githubRepoFromBase(options.releaseBaseUrl)
-  if (repo === undefined) {
+  const explicit = options.manifestUrl?.trim() ?? ''
+  const url = explicit !== '' ? explicit : channelManifestUrl(options.releaseBaseUrl)
+  if (url === undefined) {
     throw new Error('update channel is not a GitHub release base: ' + options.releaseBaseUrl)
   }
-  const releases = await readJson(
-    fetchImpl,
-    'https://api.github.com/repos/' + repo.owner + '/' + repo.repo + '/releases?per_page=' + String(RELEASE_PAGE_SIZE),
-    options.signal,
-  )
-  const tag = newestKernelTag(releases)
-  if (tag === undefined) throw new Error('no server-v* release found')
-  const assetUrl = manifestAssetUrl(releases, tag)
-  if (assetUrl === undefined) {
-    throw new Error('release ' + tag + ' has no ' + MANIFEST_ASSET + ' asset')
-  }
-  const manifest = parseServerManifest(await readJson(fetchImpl, assetUrl, options.signal))
-  assertChannel(manifest)
-  if (manifest.version !== tag.slice(TAG_PREFIX.length)) {
-    throw new Error('manifest version ' + manifest.version + ' does not match release ' + tag)
-  }
+  const manifest = parseServerManifest(await readJson(options.fetchImpl, url, options.signal))
+  assertChannel(manifest, explicit === '' ? options.releaseBaseUrl : undefined)
   return manifest
 }
 
-/** The newest kernel tag in a release listing, ignoring drafts and pre-releases. */
-export function newestKernelTag(releases: unknown): string | undefined {
-  if (!Array.isArray(releases)) return undefined
-  const tags: string[] = []
-  for (const entry of releases) {
-    if (typeof entry !== 'object' || entry === null) continue
-    const record = entry as Record<string, unknown>
-    if (record['draft'] === true || record['prerelease'] === true) continue
-    const tag = record['tag_name']
-    if (typeof tag !== 'string' || !tag.startsWith(TAG_PREFIX)) continue
-    if (tag.length === TAG_PREFIX.length) continue
-    tags.push(tag)
+/** 清单必须留在打包的渠道 origin 上，避免"换了清单就换下载源"。 */
+function assertChannel(manifest: ServerManifest, pinnedBase?: string): void {
+  if (manifest.releaseBaseUrl === '') return
+  if (githubRepoFromBase(manifest.releaseBaseUrl) === undefined) {
+    throw new Error('manifest releaseBaseUrl is not a GitHub release base')
   }
-  tags.sort((left, right) => compareVersions(right.slice(TAG_PREFIX.length), left.slice(TAG_PREFIX.length)))
-  return tags[0]
-}
-
-/** The browser URL of the manifest asset inside one release. */
-export function manifestAssetUrl(releases: unknown, tag: string): string | undefined {
-  if (!Array.isArray(releases)) return undefined
-  for (const entry of releases) {
-    if (typeof entry !== 'object' || entry === null) continue
-    const record = entry as Record<string, unknown>
-    if (record['tag_name'] !== tag) continue
-    const assets = record['assets']
-    if (!Array.isArray(assets)) continue
-    for (const asset of assets) {
-      if (typeof asset !== 'object' || asset === null) continue
-      const fields = asset as Record<string, unknown>
-      if (fields['name'] !== MANIFEST_ASSET) continue
-      const url = fields['browser_download_url']
-      if (typeof url === 'string' && url.startsWith('https://')) return url
-    }
-  }
-  return undefined
-}
-
-/** A discovered manifest must stay on the packaged channel origin. */
-function assertChannel(manifest: ServerManifest): void {
-  if (manifest.releaseBaseUrl !== '') {
-    const expected = githubRepoFromBase(manifest.releaseBaseUrl)
-    if (expected === undefined) {
-      throw new Error('manifest releaseBaseUrl is not a GitHub release base')
-    }
+  if (pinnedBase === undefined) return
+  const expected = pinnedBase.trim().replace(/\/+$/u, '')
+  const actual = manifest.releaseBaseUrl.trim().replace(/\/+$/u, '')
+  if (actual !== expected) {
+    throw new Error('manifest releaseBaseUrl ' + manifest.releaseBaseUrl + ' does not match the packaged channel ' + expected)
   }
 }
 
@@ -184,7 +148,7 @@ async function readJson(fetchImpl: typeof fetch, url: string, signal?: AbortSign
   try {
     const response = await fetchImpl(url, {
       headers: {
-        accept: 'application/vnd.github+json, application/json',
+        accept: 'application/json',
         'user-agent': 'dsh-workbuddy-panel',
       },
       signal: controller.signal,
