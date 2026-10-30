@@ -1,0 +1,22 @@
+{
+  "$comment": "macOS 默认安装位置；可用 --cn-app / --global-app 覆盖。",
+  "unpackedRelative": "Contents/Resources/app.asar.unpacked",
+  "realms": [
+    {
+      "id": "cn",
+      "label": "国服 WorkBuddy",
+      "app": "/Applications/WorkBuddy.app",
+      "bundleId": "com.tencent.workbuddy.mac",
+      "configDir": "~/.workbuddy",
+      "expectedProduct": "WorkBuddy"
+    },
+    {
+      "id": "global",
+      "label": "国际服 WorkBuddy AI",
+      "app": "/Applications/WorkBuddy AI.app",
+      "bundleId": "com.workbuddy.workbuddy-ai",
+      "configDir": "~/.workbuddy-ai",
+      "expectedProduct": "WorkBuddy AI"
+    }
+  ]
+}

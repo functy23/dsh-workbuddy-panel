@@ -1,0 +1,359 @@
+{
+  "$comment": "WorkBuddy 伪装相关请求头契约。group 用于报告分组；core=true 表示与身份/设备/agent 伪装直接相关。",
+  "headers": [
+    {
+      "name": "User-Agent",
+      "group": "ua",
+      "core": true,
+      "semantics": "platform/version + product/version + 原始 UA + CLI/version，由 UserAgentHttpInterceptor 合并"
+    },
+    {
+      "name": "X-User-Id",
+      "group": "identity",
+      "core": true,
+      "semantics": "账号 uid；runIdentityHeaders 条件写入"
+    },
+    {
+      "name": "X-Enterprise-Id",
+      "group": "identity",
+      "core": true,
+      "semantics": "企业 id；有值才写"
+    },
+    {
+      "name": "X-Auth-Method",
+      "group": "identity",
+      "core": true,
+      "semantics": "认证方式；有值才写"
+    },
+    {
+      "name": "X-Id-Source",
+      "group": "identity",
+      "core": true,
+      "semantics": "身份来源；有值才写"
+    },
+    {
+      "name": "X-Userinfo",
+      "group": "identity",
+      "core": true,
+      "semantics": "base64(JSON{uin,owner_uin,id_source,token_source})；仅在 uid 且至少一个附加字段时写"
+    },
+    {
+      "name": "X-Department-Info",
+      "group": "identity",
+      "core": true,
+      "semantics": "部门全名；有值才写"
+    },
+    {
+      "name": "X-Tenant-Id",
+      "group": "identity",
+      "core": true,
+      "semantics": "租户 id"
+    },
+    {
+      "name": "X-Domain",
+      "group": "identity",
+      "core": true,
+      "semantics": "域名/租户域"
+    },
+    {
+      "name": "X-No-User-Id",
+      "group": "identity",
+      "core": false,
+      "semantics": "显式声明不携带用户 id"
+    },
+    {
+      "name": "X-No-Enterprise-Id",
+      "group": "identity",
+      "core": false,
+      "semantics": "显式声明不携带企业 id"
+    },
+    {
+      "name": "X-No-Department-Info",
+      "group": "identity",
+      "core": false,
+      "semantics": "显式声明不携带部门信息"
+    },
+    {
+      "name": "X-No-Authorization",
+      "group": "identity",
+      "core": false,
+      "semantics": "显式声明不携带 Authorization"
+    },
+    {
+      "name": "X-Skip-Auth-Interceptor",
+      "group": "identity",
+      "core": false,
+      "semantics": "跳过认证拦截器"
+    },
+    {
+      "name": "X-Refresh-Token",
+      "group": "identity",
+      "core": false,
+      "semantics": "刷新令牌"
+    },
+    {
+      "name": "X-Token",
+      "group": "identity",
+      "core": false,
+      "semantics": "令牌透传"
+    },
+    {
+      "name": "X-WECHAT-UIN",
+      "group": "identity",
+      "core": false,
+      "semantics": "微信 uin 透传"
+    },
+    {
+      "name": "X-Device-Token",
+      "group": "device",
+      "core": true,
+      "semantics": "Turing SDK 设备令牌；WorkbuddyAuthStateHeaderProvider 注入"
+    },
+    {
+      "name": "X-Custom-Channel-Id",
+      "group": "device",
+      "core": true,
+      "semantics": "固定值 unknown（代码常量 fe）"
+    },
+    {
+      "name": "X-Device-Id-List",
+      "group": "device",
+      "core": true,
+      "semantics": "JSON {\"qimei36\":\"...\"}；qimei36 不可用时省略"
+    },
+    {
+      "name": "X-Machine-Id",
+      "group": "device",
+      "core": true,
+      "semantics": "CLIENT_INFO_MACHINE_ID / OS 机器 UUID"
+    },
+    {
+      "name": "X-Device-Id",
+      "group": "device",
+      "core": true,
+      "semantics": "CLI 侧设备 id"
+    },
+    {
+      "name": "X-Agent-Type",
+      "group": "agent",
+      "core": true,
+      "semantics": "main/team/subagent/compaction/auxiliary"
+    },
+    {
+      "name": "X-Agent-Runtime",
+      "group": "agent",
+      "core": true,
+      "semantics": "local-agent/cloud-agent/agent-agent，未知回落 other"
+    },
+    {
+      "name": "X-Agent-Purpose",
+      "group": "agent",
+      "core": true,
+      "semantics": "conversation；个人 agent 角色分支为 person_agent"
+    },
+    {
+      "name": "X-Agent-Intent",
+      "group": "agent",
+      "core": true,
+      "semantics": "请求场景，baggage x-agent-intent，回落 craft"
+    },
+    {
+      "name": "X-Parent-Conversation-ID",
+      "group": "agent",
+      "core": false,
+      "semantics": "父会话 id"
+    },
+    {
+      "name": "X-Compaction",
+      "group": "agent",
+      "core": false,
+      "semantics": "压缩类型"
+    },
+    {
+      "name": "X-Context-Compacted",
+      "group": "agent",
+      "core": false,
+      "semantics": "上下文是否已压缩"
+    },
+    {
+      "name": "X-Product",
+      "group": "product",
+      "core": true,
+      "semantics": "部署类型（deploymentType）"
+    },
+    {
+      "name": "X-Product-Version",
+      "group": "product",
+      "core": true,
+      "semantics": "产品版本"
+    },
+    {
+      "name": "X-Product-Code",
+      "group": "product",
+      "core": true,
+      "semantics": "固定 workbuddy"
+    },
+    {
+      "name": "X-IDE-Type",
+      "group": "product",
+      "core": true,
+      "semantics": "IDE 类型，桌面端为 WorkBuddy"
+    },
+    {
+      "name": "X-IDE-Name",
+      "group": "product",
+      "core": true,
+      "semantics": "IDE 名称，桌面端为 WorkBuddy"
+    },
+    {
+      "name": "X-IDE-Version",
+      "group": "product",
+      "core": true,
+      "semantics": "IDE 版本"
+    },
+    {
+      "name": "X-Client-Version",
+      "group": "product",
+      "core": true,
+      "semantics": "客户端版本（skill 推荐等接口）"
+    },
+    {
+      "name": "X-Model-ID",
+      "group": "product",
+      "core": true,
+      "semantics": "模型 id"
+    },
+    {
+      "name": "X-Data-Tag",
+      "group": "product",
+      "core": false,
+      "semantics": "数据标签"
+    },
+    {
+      "name": "X-Private-Data",
+      "group": "product",
+      "core": true,
+      "semantics": "个人账号且非企业/跳过场景时写 true"
+    },
+    {
+      "name": "X-Trace-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "链路 trace id"
+    },
+    {
+      "name": "X-Request-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "请求 id"
+    },
+    {
+      "name": "X-Root-Request-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "根请求 id"
+    },
+    {
+      "name": "X-Session-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "会话 id"
+    },
+    {
+      "name": "X-Conversation-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "对话 id"
+    },
+    {
+      "name": "X-Conversation-Request-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "对话请求 id"
+    },
+    {
+      "name": "X-Conversation-Message-ID",
+      "group": "tracing",
+      "core": false,
+      "semantics": "对话消息 id"
+    },
+    {
+      "name": "X-CodeBuddy-Request",
+      "group": "appserver",
+      "core": true,
+      "semantics": "内部 app-server 安全标记，固定 1"
+    },
+    {
+      "name": "X-Codebuddy-Run-Timeout",
+      "group": "appserver",
+      "core": false,
+      "semantics": "运行超时"
+    },
+    {
+      "name": "X-Expert-Id",
+      "group": "expert",
+      "core": false,
+      "semantics": "专家 id"
+    },
+    {
+      "name": "X-Expert-Team-Task",
+      "group": "expert",
+      "core": false,
+      "semantics": "专家团队任务标记"
+    },
+    {
+      "name": "X-Submitted-From",
+      "group": "misc",
+      "core": false,
+      "semantics": "固定 web"
+    },
+    {
+      "name": "X-Source",
+      "group": "misc",
+      "core": false,
+      "semantics": "调用来源"
+    },
+    {
+      "name": "X-Language",
+      "group": "misc",
+      "core": false,
+      "semantics": "语言"
+    },
+    {
+      "name": "X-Teams-Mode",
+      "group": "misc",
+      "core": false,
+      "semantics": "团队模式"
+    },
+    {
+      "name": "X-Wb-Uid",
+      "group": "misc",
+      "core": true,
+      "semantics": "WorkBuddy uid 冗余头"
+    },
+    {
+      "name": "X-Wb-Cover-Cache",
+      "group": "misc",
+      "core": false,
+      "semantics": "封面缓存控制"
+    },
+    {
+      "name": "X-Requested-With",
+      "group": "misc",
+      "core": false,
+      "semantics": "XMLHttpRequest"
+    },
+    {
+      "name": "X-Skip-User-Agent-Merge",
+      "group": "ua",
+      "core": false,
+      "semantics": "跳过 UA 合并"
+    },
+    {
+      "name": "X-Auth-Refresh-Source",
+      "group": "identity",
+      "core": false,
+      "semantics": "认证刷新来源"
+    }
+  ]
+}
