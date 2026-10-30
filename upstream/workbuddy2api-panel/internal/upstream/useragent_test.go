@@ -162,7 +162,7 @@ func TestFetchModelsUsesConfiguredUA(t *testing.T) {
 // --- A 段：UA 对齐官方 WorkBuddy 三段式 ---
 
 const (
-	defaultUAString      = "WorkBuddy/5.9.2 WorkBuddy/5.9.2 CLI/2.165.0"
+	defaultUAString      = "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0"
 	explicitString       = "MyCustomAgent/3.1"
 	clientVerUAString    = "WorkBuddy/6.0.0 WorkBuddy/6.0.0 CLI/2.165.0"
 	billingUAWorkBuddy   = defaultUAString
@@ -171,7 +171,7 @@ const (
 )
 
 // TestUserAgentDefaultWorkBuddyShape 默认（无任何配置）聊天/刷新出站 UA =
-// 官方 WorkBuddy 三段式（5.9.2 + CLI 2.165.0）。
+// 官方国服 WorkBuddy 三段式（5.9.3 + CLI 2.165.0）。
 func TestUserAgentDefaultWorkBuddyShape(t *testing.T) {
 	a := &auth.Auth{AccessToken: "at", UID: "u1"}
 	c := &Client{

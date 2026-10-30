@@ -28,10 +28,15 @@ const (
 	// https://www.workbuddy.cn（旧 copilot.tencent.com 是早期 CLI 域）。
 	upstreamBaseCN     = "https://www.workbuddy.cn"
 	upstreamBaseGlobal = "https://www.workbuddy.ai"
-	// clientUA 登录态请求的 UA：与出站业务请求同一条官方三段式（见
-	// internal/upstream 的 defaultClientVersion / defaultCliVersion）。
+	// clientUACN / clientUAGlobal 登录态请求的 UA：与出站业务请求同一条官方三段式
+	// （见 internal/upstream 的 defaultClientVersionCN / defaultClientVersionGlobal /
+	// defaultCliVersion）。登录态按 origin 选 realm，两侧产品段不同：
+	// 国服 WorkBuddy/5.9.3，国际服 workbuddy-ai/5.9.4（真机 main.log 实证）。
 	// 旧值 CLI/2.63.2 CodeBuddy/2.63.2 是 CodeBuddy CLI 形态，与桌面端不符。
-	clientUA            = "WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0"
+	clientUACN     = "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0"
+	clientUAGlobal = "workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0"
+	// clientUA 国服口径（兼容既有引用与测试）。
+	clientUA = clientUACN
 	originRefererCN     = "https://www.workbuddy.cn"
 	originRefererGlobal = "https://www.workbuddy.ai"
 	// authPlatform 官方 device-flow 的 platform 参数（product.json
@@ -68,11 +73,19 @@ func commonHeaders(req *http.Request, origin string) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Origin", origin)
 	req.Header.Set("Referer", origin+"/")
-	req.Header.Set("User-Agent", clientUA)
+	req.Header.Set("User-Agent", clientUAFor(origin))
 	req.Header.Set("X-No-Authorization", "true")
 	req.Header.Set("X-No-User-Id", "true")
 	req.Header.Set("X-No-Enterprise-Id", "true")
 	req.Header.Set("X-No-Department-Info", "true")
+}
+
+// clientUAFor 按登录域选 UA：global → workbuddy-ai/5.9.4，其余 → WorkBuddy/5.9.3。
+func clientUAFor(origin string) string {
+	if origin == originRefererGlobal {
+		return clientUAGlobal
+	}
+	return clientUACN
 }
 
 // validUID 校验上游返回的 uid 是否可安全用于拼文件名。

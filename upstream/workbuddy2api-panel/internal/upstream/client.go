@@ -749,24 +749,26 @@ type Client struct {
 
 	// UserAgent 出站 User-Agent 显式覆盖（非空时全路径生效，优先于默认三段式）。
 	// 空 = 默认官方形态：chat/refresh/FetchModels 走
-	// `WorkBuddy/<ver> WorkBuddy/<ver> CLI/<cliVer>`；billing 走 `WorkBuddy/<ver>`
-	// （仅当 client_name 非空）。
+	// `<product>/<ver> <product>/<ver> CLI/<cliVer>`（国服 product=WorkBuddy，
+	// 国际服 product=workbuddy-ai）；billing 走单段（仅当 client_name 非空）。
 	UserAgent string
 
-	// ClientVersion WorkBuddy 客户端版本段（出站 UA 的 `WorkBuddy/<ver>`、
-	// X-IDE-Version 与桌面事件指纹 ideVersion）。空 = 内置默认（官方 5.8.3 分发包）。
+	// ClientVersion 客户端版本段（出站 UA 的产品段、X-IDE-Version 与桌面事件
+	// 指纹 ideVersion）。空 = 按 realm 取内置默认：国服 5.9.3 / 国际服 5.9.4
+	// （官方 2026-10-27 / 2026-10-30 分发包）。
 	ClientVersion string
 
-	// CliVersion 出站 UA 中 `CLI/<ver>` 段版本。空 = 内置默认（官方内置 CLI 2.161.0）。
+	// CliVersion 出站 UA 中 `CLI/<ver>` 段版本。空 = 内置默认（官方内置
+	// @genie/agent-cli 2.165.0，国服 5.9.3 与国际服 5.9.4 相同）。
 	CliVersion string
 
 	// ClientName X-IDE-Name / X-IDE-Type 取值（默认 "WorkBuddy"）。
 	// 显式配 "SaaS" 走旧行为逃生门（只发 X-Product，不发 X-IDE-*/X-Agent-*）。
 	ClientName string
 
-	// UAClientName UA 第二段（客户端产品名）。空 = 官方硬编码值 "WorkBuddy"
-	// （5.8.3 与 5.8.4 分发包的 VLM 网关都写死该段，与 realm 无关）。
-	// 逃生门：upstream.ua_client_name 可覆盖（旧行为是海外账号发 "WorkBuddy AI"）。
+	// UAClientName UA 产品段（两段同名）。空 = 按 realm 取官方值：国服
+	// "WorkBuddy" / 国际服 "workbuddy-ai"（5.9.4 的 CLI 稳态 UA 两段都是小写）。
+	// 逃生门：upstream.ua_client_name 可覆盖（同时覆盖两段，仅排障用）。
 	UAClientName string
 
 	// ChatFingerprint chat 请求的指纹形态：

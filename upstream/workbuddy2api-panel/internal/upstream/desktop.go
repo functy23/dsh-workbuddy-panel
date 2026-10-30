@@ -132,19 +132,25 @@ func (c *Client) qimei36() string {
 	return ""
 }
 
-// electronRendererUA 渲染进程（Web 形态端点）UA：从官方 5.8.3 的 renderer.log 实证
-// `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ... WorkBuddy/5.8.3
-// Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36`。
+// electronRendererUA 渲染进程（Web 形态端点）UA：从官方 renderer.log 实证——
+//
+//	国服 5.9.3:   ... WorkBuddy/5.9.3 Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36
+//	国际服 5.9.4: ... WorkBuddyAI/5.9.4 workbuddy-ai/5.9.4 Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36
+//
 // x-client-platform: web 的端点（领奖 / 资料 / Web 事件）由渲染进程发出，
 // 用 CLI 三段式 UA 会被识别成"非浏览器端"，故按 realm 组装对应形态。
+//
+// 国际服的渲染进程产品段是 `WorkBuddyAI/<v> workbuddy-ai/<v>`（大写 AI 连写 +
+// 小写产品段两段）；旧实现写成 "WorkBuddy AI/<v>"（带空格、单段），与真机逐字符不符。
 func (c *Client) electronRendererUA(a *auth.Auth) string {
+	const head = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+	const tail = " Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36"
+	ver := c.clientVersionFor(a)
 	if a != nil && a.IsGlobal() {
 		// 国际版桌面端跑在 macOS/Windows 上同为 Electron 渲染进程，平台段一致。
-		return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
-			"WorkBuddy AI/" + c.clientVersion() + " Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36"
+		return head + "WorkBuddyAI/" + ver + " " + uaProductGlobal + "/" + ver + tail
 	}
-	return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
-		"WorkBuddy/" + c.clientVersion() + " Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36"
+	return head + "WorkBuddy/" + ver + tail
 }
 
 // desktopBase 桌面端 /v2/report 与 user-asset 走 chatBase（copilot.tencent.com）。
@@ -224,7 +230,7 @@ func (c *Client) ReportDesktopEvent(a *auth.Auth, events ...DesktopEvent) error 
 	if len(events) == 0 {
 		return fmt.Errorf("desktop report: no events")
 	}
-	fp := c.desktopFingerprint(a, c.clientVersion())
+	fp := c.desktopFingerprint(a, c.clientVersionFor(a))
 	arr := make([]map[string]any, 0, len(events))
 	for _, ev := range events {
 		m := map[string]any{}

@@ -1,40 +1,40 @@
 {
   "schemaVersion": 1,
-  "version": "1.14.0-panel",
+  "version": "1.15.0-panel",
   "apiVersion": 1,
   "minPanel": "0.4.0",
-  "releaseTag": "server-v1.14.0-panel",
+  "releaseTag": "server-v1.15.0-panel",
   "releaseBaseUrl": "https://github.com/functy23/dsh-workbuddy-panel/releases/download",
   "assets": {
     "darwin-arm64": {
-      "asset": "workbuddy2api-1.14.0-panel-darwin-arm64.gz",
-      "sha256": "45426eef7c35ace2c8f14fee848854144c812223eb1a0826f65c81d448b347f3",
+      "asset": "workbuddy2api-1.15.0-panel-darwin-arm64.gz",
+      "sha256": "8c0986acada3fc30961342788a7c7453e42203e3e8afd18936a8c0c5854f7369",
       "size": 9864930,
-      "downloadSize": 3978867
+      "downloadSize": 3978951
     },
     "darwin-x64": {
-      "asset": "workbuddy2api-1.14.0-panel-darwin-x64.gz",
-      "sha256": "47e000f0d026f713c42880cbe56b34bb3f4665cd4d894b48f1de215df2986cb2",
+      "asset": "workbuddy2api-1.15.0-panel-darwin-x64.gz",
+      "sha256": "d609302512a1a7fdec7834fc4280daa583b0fbad2f12cd85233e2bc343a9f7f7",
       "size": 10575264,
-      "downloadSize": 4290961
+      "downloadSize": 4290419
     },
     "linux-x64": {
-      "asset": "workbuddy2api-1.14.0-panel-linux-x64.gz",
-      "sha256": "d101dc8e9489c85df861d8aa422404385486c0dfa724a5877c7fa3dc2368739b",
+      "asset": "workbuddy2api-1.15.0-panel-linux-x64.gz",
+      "sha256": "befa7c4a60ff0c14fb48f826256e45bf8a820f2d4bcbe8787b0a6c0d292a2321",
       "size": 10322080,
-      "downloadSize": 4209422
+      "downloadSize": 4209655
     },
     "linux-arm64": {
-      "asset": "workbuddy2api-1.14.0-panel-linux-arm64.gz",
-      "sha256": "c732bb8efab97fed4a4d23df55d979ab0446a963694ccc7c4c1afe0838e88f10",
+      "asset": "workbuddy2api-1.15.0-panel-linux-arm64.gz",
+      "sha256": "ce719b98ab7365272ae1155f601388476309363f9bb3ec63394bd8c5dba57e50",
       "size": 9633952,
-      "downloadSize": 3823698
+      "downloadSize": 3824253
     },
     "win32-x64": {
-      "asset": "workbuddy2api-1.14.0-panel-win32-x64.gz",
-      "sha256": "e5390b9f59bc1c0321b717879a12d99947fa145be3c7a6c2754ff279de2fd6c8",
-      "size": 10597376,
-      "downloadSize": 4313370
+      "asset": "workbuddy2api-1.15.0-panel-win32-x64.gz",
+      "sha256": "2dd81220e1a7bf17439045af5f9f12515d57c1446fe9574c83747eb32bd1d98f",
+      "size": 10598400,
+      "downloadSize": 4313405
     }
   }
 }

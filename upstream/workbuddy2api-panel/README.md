@@ -192,7 +192,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 | 上游改动 | 吸收内容 |
 |---|---|
 | 净化增强 | `tool_calls.arguments` 盲区修复（content=null 的工具调用轮此前完全漏净化）、裸 `11128` 反探测改写、桌面版身份句（逗号形态）漏网修复、反馈句整句改写 |
-| 出站头族 | UA 对齐官方三段式 `WorkBuddy/<ver> WorkBuddy/<ver> CLI/<ver>`（默认 **5.8.3 / CLI 2.161.0**，可配）；`X-IDE-*` + `X-Agent-Intent/Type/Purpose` + `X-Product: SaaS`（deploymentType）+ `X-Auth-Method` + `X-Userinfo` 全量对齐官方 5.8.3 抓包；`X-Device-Token` 设备风控头（auth 每号 / config / 文件三源） |
+| 出站头族 | UA 对齐官方三段式 `<product>/<ver> <product>/<ver> CLI/<ver>`（默认 **5.9.3 国服 / 5.9.4 国际服，CLI 2.165.0**，可配；产品段国服 `WorkBuddy`、国际服 `workbuddy-ai`）；`X-IDE-*` + `X-Agent-Intent/Type/Purpose` + `X-Product: SaaS`（deploymentType）+ `X-Auth-Method` + `X-Userinfo` 全量对齐官方 5.9.3 / 5.9.4 抓包；`X-Device-Token` 设备风控头（auth 每号 / config / 文件三源） |
 | 并发修复 | 客户端 IP 改按请求参数传递（消除共享字段竞态） |
 | 签到幂等 | `IsAlreadyCheckin` 识别"今天已签到"（code=10001/14001），调度日志不再把重复签到当失败 |
 | 粘性按模型判活 | 会话绑定的账号被 6004 模型级限额后，换模型请求自动解绑重分配（治"限额后换不动号"）；`/healthz` 探活计入模型豁免形态（治"全号被单模型限流探活误报 503"） |
@@ -401,10 +401,10 @@ curl -s http://localhost:7863/v1/search/messages \
 | `upstream.timeout_seconds` | `120` | 短 RPC（刷新 / 签到 / 余额 / 模型列表）总时长上限 |
 | `upstream.header_timeout_seconds` | 回落 `timeout_seconds` | 聊天首字节前（响应头）上限 |
 | `upstream.idle_timeout_seconds` | `300` | 聊天流中空闲上限（活跃续命，静默断流） |
-| `upstream.user_agent` | 空 | 出站 User-Agent 覆盖（空 = 官方三段式 `WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0`） |
-| `upstream.client_version` / `upstream.cli_version` | `5.8.3` / `2.161.0` | UA 的两段版本与 `X-IDE-Version`；上游升版后改这里（需重启），不必改码 |
+| `upstream.user_agent` | 空 | 出站 User-Agent 覆盖（空 = 官方三段式，按 realm 取 `WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0` 或 `workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0`） |
+| `upstream.client_version` / `upstream.cli_version` | 空 / 空 | UA 的两段版本与 `X-IDE-Version`。空 = 按 realm 取内置默认（国服 5.9.3 / 国际服 5.9.4）与 CLI 2.165.0；上游升版后改这里（需重启），不必改码 |
 | `upstream.client_name` | 空（=`WorkBuddy`） | `X-IDE-Name`/`X-IDE-Type` 取值；显式配 `SaaS` 走旧行为逃生门（只发 `X-Product`，不发 `X-IDE-*`/`X-Agent-*`），仅排障用 |
-| `upstream.ua_client_name` | 空（=`WorkBuddy`） | UA 第二段覆盖。官方两段都写死 `WorkBuddy`（与 realm 无关）；历史上海外账号会发 `WorkBuddy AI`，需要复现旧行为时配它 |
+| `upstream.ua_client_name` | 空 | UA 产品段覆盖（两段同时生效）。空 = 按 realm：国服 `WorkBuddy`、国际服 `workbuddy-ai`（5.9.4 的 CLI 稳态 UA 两段都是小写 `workbuddy-ai`） |
 | `upstream.chat_fingerprint` | `cli` | chat 头族形态：`cli` = 桌面端**文本会话**（CLI ModelProvider + 身份拦截器，默认、与真实聊天流量一致）；`vlm` = skills VLM 代理形态（`/skills/vlm/chat` 视觉转发那条链路，仅对照/排障）。别名 `desktop` = `vlm` |
 | `upstream.device_token` / `upstream.device_token_file` | 空 | `X-Device-Token`（TuringShield）来源：auth 每号 > config > 文件兜底。**只在签到请求上注入**——官方该头是签到专属，模型/余额/上报都不带 |
 | `features.sanitize_blacklist_fingerprints` | `true` | 出站请求体黑名单指纹脱敏 |

@@ -40,18 +40,26 @@ import (
 )
 
 const (
-	// defaultClientVersion 出站 WorkBuddy 客户端版本段（UA 的 `WorkBuddy/<ver>` 与
-	// X-IDE-Version）。对齐官方 WorkBuddy Desktop **5.9.2** 分发包（asar package.json
-	// version=5.9.2，Electron 37.10.3 / Chrome 138.0.7204.251）。
+	// defaultClientVersionCN 国服出站客户端版本段（UA 的产品段与 X-IDE-Version）。
+	// 对齐官方 WorkBuddy Desktop **5.9.3** 分发包（asar cli/product.json
+	// genieVersion=5.9.3，Electron 37.10.3 / Chrome 138.0.7204.251）。
 	// config upstream.client_version 可覆盖。
-	defaultClientVersion = "5.9.2"
-	// defaultCliVersion 出站 UA 中 `CLI/<ver>` 段版本。对齐官方 5.9.2 内置 CLI
-	// （app.asar.unpacked/cli/package.json version=2.165.0）。
-	// config upstream.cli_version 可覆盖。
+	defaultClientVersionCN = "5.9.3"
+	// defaultClientVersionGlobal 国际服出站客户端版本段。对齐官方 WorkBuddy AI
+	// **5.9.4**（com.workbuddy.workbuddy-ai，genieVersion=5.9.4）。
+	// 国服与国际服从 5.9.3 / 5.9.4 起版本号不再同步，故按 realm 分叉。
+	defaultClientVersionGlobal = "5.9.4"
+	// defaultCliVersion 出站 UA 中 `CLI/<ver>` 段版本。国服 5.9.3 与国际服 5.9.4
+	// 内置的都是 @genie/agent-cli 2.165.0（app.asar.unpacked/cli/package.json），
+	// 两侧一致，故不按 realm 分叉。config upstream.cli_version 可覆盖。
 	defaultCliVersion = "2.165.0"
 
 	// ideName 官方 X-IDE-Type / X-IDE-Name 固定值（产品名，不是部署类型）。
 	ideName = "WorkBuddy"
+	// uaProductGlobal 国际服 UA 产品段。官方 5.9.4 的 CLI 稳态 UA 是
+	// `workbuddy-ai/<v> workbuddy-ai/<v> CLI/<cli>`（两段同名、全小写），
+	// 与国服 `WorkBuddy/<v> WorkBuddy/<v> CLI/<cli>` 只差这一处。
+	uaProductGlobal = "workbuddy-ai"
 	// deploymentTypeSaaS 官方 X-Product 取值（product.json deploymentType）。
 	deploymentTypeSaaS = "SaaS"
 	// authMethodPlugin 官方 X-Auth-Method 取值（plugin OAuth 通道）。
@@ -95,12 +103,24 @@ func originRefererFor(a *auth.Auth) string {
 	return originRefererCN
 }
 
-// clientVersion 生效的 WorkBuddy 客户端版本：Client.ClientVersion 非空则取之。
+// clientVersion 生效的 WorkBuddy 客户端版本（国服口径，nil 账号）。
 func (c *Client) clientVersion() string {
+	return c.clientVersionFor(nil)
+}
+
+// clientVersionFor 生效的客户端版本：Client.ClientVersion 显式配置优先，
+// 否则按账号 realm 取默认值——国服 5.9.3、国际服 5.9.4。
+//
+// 两侧版本号从 5.9.3 / 5.9.4 起不再同步（国服 2026-10-27 发 5.9.3，国际服
+// 2026-10-30 发 5.9.4），用一个常量会让其中一侧永远落后一个版本。
+func (c *Client) clientVersionFor(a *auth.Auth) string {
 	if c != nil && c.ClientVersion != "" {
 		return c.ClientVersion
 	}
-	return defaultClientVersion
+	if a != nil && a.IsGlobal() {
+		return defaultClientVersionGlobal
+	}
+	return defaultClientVersionCN
 }
 
 // cliVersion 生效的 CLI 版本：Client.CliVersion 非空则取之。
@@ -112,29 +132,40 @@ func (c *Client) cliVersion() string {
 }
 
 // defaultWorkBuddyUAFor 组装官方客户端出站 UA（三段式）：
-// `WorkBuddy/<ver> <platform>/<ver> CLI/<cliVer>`。
+// `<product>/<ver> <product>/<ver> CLI/<cliVer>`。
 //
-// 平台段取值以**分发包代码**为准，而不是按 realm 猜：
-//   - 5.8.3（com.tencent.workbuddy.mac）与 5.8.4（com.workbuddy.workbuddy-ai，
-//     即 WorkBuddy AI 海外版）的 main/server.js 里，buildVlmGatewayHeaders()
-//     都把平台段硬编码成 "WorkBuddy"：
-//     `n['User-Agent']=['WorkBuddy/'+r,'WorkBuddy/'+r,...(i?['CLI/'+i]:[])].join(' ')`
-//     —— 海外版连 bundleId/显示名都改了，UA 段也没改。
-//   - 旧实现按 realm 在海外账号上发 "WorkBuddy AI"（源于 5.5.2 intl 包的观察），
-//     与当前 5.8.x 分发包不一致，属可被上游识别的偏差。
+// 产品段以**分发包代码 + 运行时日志**为准，按 realm 分叉：
+//   - 国服 5.9.3：main.log 里 CloudProductManager 的稳态 UA 是
+//     `WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0`；
+//   - 国际服 5.9.4：同一处日志是
+//     `workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0`（两段都小写）。
 //
-// 若某天上游对平台段另有要求，用 upstream.ua_client_name 覆盖即可（不必改码）。
+// 5.8.x 时代国际服确实两段都写 "WorkBuddy"（main/server.js 的
+// buildVlmGatewayHeaders 硬编码），5.9.4 起改回 `workbuddy-ai`，所以旧实现
+// "不按 realm 分叉" 的结论在 5.9.4 上已经不成立——这是本次升级对齐的重点。
+//
+// 若某天上游对产品段另有要求，用 upstream.ua_client_name 覆盖即可（不必改码）。
 // 官方无任何 UA 随机化，故默认确定性。
 func (c *Client) defaultWorkBuddyUAFor(a *auth.Auth) string {
-	_ = a // 平台段不再按 realm 分叉，保留参数以兼容既有调用点
-	return "WorkBuddy/" + c.clientVersion() + " " + c.uaClientName() + "/" + c.clientVersion() + " CLI/" + c.cliVersion()
+	ver := c.clientVersionFor(a)
+	product := c.uaClientNameFor(a)
+	return product + "/" + ver + " " + product + "/" + ver + " CLI/" + c.cliVersion()
 }
 
-// uaClientName UA 第二段（客户端产品名）：默认官方硬编码值 "WorkBuddy"，
-// upstream.ua_client_name 可覆盖（逃生门，仅排障用）。
+// uaClientName UA 产品段（国服口径）：默认官方值 "WorkBuddy"。
 func (c *Client) uaClientName() string {
+	return c.uaClientNameFor(nil)
+}
+
+// uaClientNameFor UA 产品段：Client.UAClientName 显式配置优先，否则按 realm——
+// 国服 "WorkBuddy"、国际服 "workbuddy-ai"。
+// upstream.ua_client_name 是逃生门（仅排障用），会同时覆盖两段。
+func (c *Client) uaClientNameFor(a *auth.Auth) string {
 	if c != nil && c.UAClientName != "" {
 		return c.UAClientName
+	}
+	if a != nil && a.IsGlobal() {
+		return uaProductGlobal
 	}
 	return ideName
 }
@@ -327,14 +358,15 @@ func (c *Client) injectProduct(req *http.Request) {
 // cli/dist 的 ProviderHttpHeaders 则必发三头。故只在 chat/search 路径注入——
 // billing/签到/上报带它就是"把 CLI 头族混进主进程请求"。
 // ClientName 显式配 "SaaS" 时整族不发（旧行为逃生门，仅供排障对比）。
-func (c *Client) injectIDEFamily(req *http.Request) {
+func (c *Client) injectIDEFamily(req *http.Request, a *auth.Auth) {
 	name := c.attributionClientName()
 	if name == deploymentTypeSaaS {
 		return
 	}
 	req.Header.Set("X-IDE-Type", name)
 	req.Header.Set("X-IDE-Name", name)
-	req.Header.Set("X-IDE-Version", c.clientVersion())
+	// X-IDE-Version 跟随账号 realm 的桌面版本（国服 5.9.3 / 国际服 5.9.4）。
+	req.Header.Set("X-IDE-Version", c.clientVersionFor(a))
 }
 
 // injectModelAttribution 注入只在**模型请求**上出现的官方指纹头：
@@ -499,7 +531,7 @@ func (c *Client) ChatHeaders(req *http.Request, a *auth.Auth, clientIP string, m
 	// CLI 模型请求专属头族：身份拦截器两头 + X-IDE-* + X-Agent-*（含 runtime）。
 	// （主进程基线里没有这些，见 CommonHeaders 注释。）
 	injectCLIIdentity(req, a)
-	c.injectIDEFamily(req)
+	c.injectIDEFamily(req, a)
 	req.Header.Set("X-Agent-Intent", agentIntentCraft)
 	req.Header.Set("X-Agent-Type", agentTypeMain)
 	req.Header.Set("X-Agent-Runtime", agentRuntimeOther)

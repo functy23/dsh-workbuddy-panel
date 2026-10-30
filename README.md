@@ -6,7 +6,7 @@
 
 <p align="center"><b>WorkBuddy2API × DeepSeek Harness</b></p>
 
-把 [workbuddy2api](https://github.com/linguo2625469/workbuddy2api-panel) 网关接进 DSH 的模型选择器：面板与内核分离，网关本体按 `server.json` 单独下载、校验后由宿主 `ctx.subprocess` 托管；账号池、模型目录、思考档位与额度都在 DSH 设置页里管理，不用再打开网关的网页面板。内核基于 workbuddy2api-panel 构建，出站指纹对齐官方 WorkBuddy Desktop 5.9.2。
+把 [workbuddy2api](https://github.com/linguo2625469/workbuddy2api-panel) 网关接进 DSH 的模型选择器：面板与内核分离，网关本体按 `server.json` 单独下载、校验后由宿主 `ctx.subprocess` 托管；账号池、模型目录、思考档位与额度都在 DSH 设置页里管理，不用再打开网关的网页面板。内核基于 workbuddy2api-panel 构建，出站指纹对齐官方 WorkBuddy Desktop **5.9.3（国服）/ WorkBuddy AI 5.9.4（国际服）**。
 
 ## 特点
 
@@ -28,8 +28,8 @@
 
 以下改动来自本仓库对上游快照的本地修改；服务端 Release 由这棵树构建。
 
-- **UA / 版本更新**：`WorkBuddy/5.9.2 … CLI/2.165.0`，`X-IDE-Version` 同源；`upstream.client_version` / `cli_version` 可覆盖。
-- **设备指纹**：`/v2/report` 的 `reportDelay` 恒 0；`machineId` 改为 UUID 形态（大写、带横线，同一账号稳定）；`sessionId` 进程级随机；OS / CPU / 内存用真机样本缺省值且可配；`commit` / `releaseDate` 对齐 5.9.2；`qimei36` 可注入，缺省**不发**。
+- **UA / 版本更新（按 realm 分叉）**：国服 `WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0`，国际服 `workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0`；`X-IDE-Version` 与渲染进程 UA（`WorkBuddy/<v>` / `WorkBuddyAI/<v> workbuddy-ai/<v>`）同源；`upstream.client_version` / `cli_version` / `ua_client_name` 可覆盖。
+- **设备指纹**：`/v2/report` 的 `reportDelay` 恒 0；`machineId` 改为 UUID 形态（大写、带横线，同一账号稳定）；`sessionId` 进程级随机；OS / CPU / 内存用真机样本缺省值且可配；`commit` / `releaseDate` 对齐 5.9.2 包内 product.json（官方未改）；`qimei36` 可注入，缺省**不发**。
 - **Chat 头族**：`X-Agent-Type: main`、`X-Agent-Runtime: other`、`X-Agent-Purpose: conversation`、`X-Private-Data` 按个人 / 企业号取值、`Accept` 用 axios 默认串；去掉 `Accept-Encoding: identity` 与 `X-CodeBuddy-Request`。
 - **身份族**：补 `X-Id-Source` / `X-Department-Info` / `X-Userinfo.id_source`，只在 CLI 链路发。
 - **模型目录端点**：`/console/` 补 `X-Requested-With` 与浏览器 `Accept`，对齐主进程里唯一显式设置这两头的调用。

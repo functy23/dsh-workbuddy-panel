@@ -140,36 +140,57 @@ func TestNonChatModelGenerationTags(t *testing.T) {
 	}
 }
 
-// TestDesktopUAForGlobalAccount 桌面端 UA 的平台段以**分发包代码**为准：
-// 5.9.2（国内）与海外包（com.workbuddy.workbuddy-ai，WorkBuddy AI）的
-// main/server.js buildVlmGatewayHeaders() 都把第二段硬编码成 "WorkBuddy"，
-// 不随 realm 变化。旧实现让海外账号发 "WorkBuddy AI"（5.5.2 intl 包的旧观察），
-// 与 5.8.x 分发包不一致。
+// TestDesktopUAForGlobalAccount 桌面端 UA 的产品段按 realm 分叉：
+//
+//	国服 5.9.3:   WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0
+//	国际服 5.9.4: workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0
+//
+// 依据是两台客户端的 main.log（CloudProductManager 的 user-agent）与
+// cli/dist 的 buildUserAgent：5.8.x 国际服确实两段都写 "WorkBuddy"，
+// 5.9.4 起改成小写 workbuddy-ai，两段同名。旧实现"不随 realm 变化"的
+// 结论只对 5.8.x 成立，对 5.9.4 是错的。
 func TestDesktopUAForGlobalAccount(t *testing.T) {
 	c := New()
 	global := &auth.Auth{UID: "u1", Domain: "www.workbuddy.ai"}
 	global.BackfillRealm()
 	ua := c.defaultWorkBuddyUAFor(global)
-	if want := "WorkBuddy/5.9.2 WorkBuddy/5.9.2 CLI/"; !contains(ua, want) {
-		t.Errorf("global desktop UA = %q, want prefix %q", ua, want)
+	if want := "workbuddy-ai/5.9.4 workbuddy-ai/5.9.4 CLI/2.165.0"; ua != want {
+		t.Errorf("global desktop UA = %q, want %q", ua, want)
 	}
 	if contains(ua, "WorkBuddy AI") {
-		t.Errorf("global desktop UA = %q must not contain 'WorkBuddy AI'（分发包硬编码 WorkBuddy）", ua)
+		t.Errorf("global desktop UA = %q must not contain 'WorkBuddy AI'（真机是 WorkBuddyAI/workbuddy-ai）", ua)
 	}
-	if !contains(ua, "CLI/") {
-		t.Errorf("global desktop UA = %q, want CLI segment", ua)
-	}
-	// 逃生门：显式配 ua_client_name 时回退旧形态。
+	// 逃生门：显式配 ua_client_name 时两段都跟随。
 	c2 := New()
 	c2.UAClientName = "WorkBuddy AI"
-	if ua := c2.defaultWorkBuddyUAFor(global); !contains(ua, "WorkBuddy AI") {
+	if ua := c2.defaultWorkBuddyUAFor(global); ua != "WorkBuddy AI/5.9.4 WorkBuddy AI/5.9.4 CLI/2.165.0" {
 		t.Errorf("ua_client_name 覆盖未生效：%q", ua)
 	}
-	// CN 账号同段。
+	// CN 账号保持 WorkBuddy 两段。
 	cn := &auth.Auth{UID: "u2", Domain: "copilot.tencent.com"}
 	cn.BackfillRealm()
-	if ua := c.defaultWorkBuddyUAFor(cn); contains(ua, "WorkBuddy AI") {
-		t.Errorf("cn desktop UA = %q, must not contain 'WorkBuddy AI'", ua)
+	if ua := c.defaultWorkBuddyUAFor(cn); ua != "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0" {
+		t.Errorf("cn desktop UA = %q", ua)
+	}
+}
+
+// TestRendererUAForBothRealms 渲染进程 UA 逐字符对齐真机 renderer.log：
+// 国服 `WorkBuddy/<v>`，国际服 `WorkBuddyAI/<v> workbuddy-ai/<v>`。
+func TestRendererUAForBothRealms(t *testing.T) {
+	c := New()
+	cn := &auth.Auth{UID: "u1", Domain: "copilot.tencent.com"}
+	cn.BackfillRealm()
+	wantCN := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
+		"WorkBuddy/5.9.3 Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36"
+	if got := c.electronRendererUA(cn); got != wantCN {
+		t.Errorf("cn renderer UA = %q, want %q", got, wantCN)
+	}
+	global := &auth.Auth{UID: "u2", Domain: "www.workbuddy.ai"}
+	global.BackfillRealm()
+	wantGlobal := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
+		"WorkBuddyAI/5.9.4 workbuddy-ai/5.9.4 Chrome/138.0.7204.251 Electron/37.10.3 Safari/537.36"
+	if got := c.electronRendererUA(global); got != wantGlobal {
+		t.Errorf("global renderer UA = %q, want %q", got, wantGlobal)
 	}
 }
 
