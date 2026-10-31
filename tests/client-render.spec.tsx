@@ -171,13 +171,47 @@ function fakeDirectory(provider: string): ModelDirectory['store'] {
 
 describe('credit badge', () => {
   const store = fakeStore({ document, loading: false })
+  /** Two usable domestic accounts: enough that the pool alone cannot name one. */
+  const pair = [
+    { ...document.accounts[0]!, uid: 'u1', nickname: '低调哥', credits: 2099, creditsTotal: 2100 },
+    { ...document.accounts[0]!, uid: 'u3', nickname: '备用号', credits: 4000, creditsTotal: 4000 },
+  ]
 
-  it('shows the domestic pool when the domestic route is selected', () => {
+  it('names the domestic account the pool would spend from', () => {
     const html = renderToStaticMarkup(
       <WorkBuddy2ApiCreditBadge t={zh} store={store} directory={fakeDirectory('workbuddy2api')} />,
     )
     expect(html).toContain('CN 剩余积分')
+    // One usable domestic account is unambiguous even with no request history.
+    expect(html).toContain('<b>低调哥</b>')
     expect(html).toContain('2,099')
+  })
+
+  it('names the account that served the last request when several are usable', () => {
+    const served = fakeStore({
+      loading: false,
+      document: {
+        ...document,
+        accounts: [
+          { ...pair[0]!, lastSuccess: '2026-10-31T12:00:00.000Z' },
+          { ...pair[1]!, lastSuccess: '2026-10-31T14:19:11.000Z' },
+        ],
+      },
+    })
+    const html = renderToStaticMarkup(
+      <WorkBuddy2ApiCreditBadge t={zh} store={served} directory={fakeDirectory('workbuddy2api')} />,
+    )
+    expect(html).toContain('<b>备用号</b>')
+    expect(html).toContain('4,000')
+  })
+
+  it('falls back to the pool label and the realm total when nothing can name one account', () => {
+    const pond = fakeStore({ loading: false, document: { ...document, accounts: pair } })
+    const html = renderToStaticMarkup(
+      <WorkBuddy2ApiCreditBadge t={zh} store={pond} directory={fakeDirectory('workbuddy2api')} />,
+    )
+    expect(html).toContain('<b>账号池</b>')
+    expect(html).toContain('6,099')
   })
 
   it('shows the global pool when the global route is selected', () => {
@@ -187,6 +221,8 @@ describe('credit badge', () => {
     expect(html).toContain('Global 剩余积分')
     expect(html).toContain('5')
     expect(html).not.toContain('2,099')
+    // The only global account is cooling, so no account can be named.
+    expect(html).toContain('<b>账号池</b>')
   })
 
   it('renders nothing for another provider', () => {
