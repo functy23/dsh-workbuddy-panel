@@ -1,4 +1,4 @@
-import { a as GatewayState, c as KernelUpdateStatus, d as ServerStatus, i as GatewayLogLine, l as ServerDownloadState, n as GATEWAY_HOST_SERVICE_VERSION, o as GatewayStatus, r as GatewayHost, s as KernelCheckCadence, t as GATEWAY_HOST_SERVICE, u as ServerDownloadStatus } from "./gateway-contract-C6PWwSdB.js";
+import { a as GatewayHost, c as GatewayStatus, d as ServerDownloadState, f as ServerDownloadStatus, l as KernelCheckCadence, n as GATEWAY_HOST_SERVICE_VERSION, o as GatewayLogLine, p as ServerStatus, s as GatewayState, t as GATEWAY_HOST_SERVICE, u as KernelUpdateStatus } from "./gateway-contract-CDOI53nR.js";
 import z from "@deepseek-ai/schemastery";
 import { ImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
 import "@earendil-works/pi-ai";
@@ -643,7 +643,25 @@ declare class WorkBuddy2ApiService {
   accountOp(uid: string, op: AccountOp): Promise<ActionOutcome>;
   /** One pool-wide operation. */
   bulkOp(op: BulkOp): Promise<ActionOutcome>;
-  /** Import accounts from the cockpit export shape. */
+  /**
+   * Import whatever the token field received.
+   *
+   * Two doors, chosen by what the credential can prove it has:
+   *
+   * - **A refresh token** → the panel's own import endpoint. That is the hot path:
+   *   the account joins the pool without a restart, and the panel runs its
+   *   check-in and balance probes on the way in.
+   * - **An access token only** → the gateway's auths directory, then a restart.
+   *   The panel endpoint refuses a credential it cannot renew (it skips any record
+   *   without `refresh_token`), and faking one would hand the scheduler a value
+   *   that answers 12153 on its first keepalive — three of those and the account is
+   *   disabled. A file with an empty refresh token is honest: the pool shows
+   *   `has_refresh_token: false` and the scheduler leaves it alone until the
+   *   access token expires.
+   *
+   * Rejected inputs are reported one line each, with the reason the parser found —
+   * a bare JWT is the normal case here, so "payload is not JSON" would be a lie.
+   */
   importAccounts(payload: string): Promise<ActionOutcome>;
   /**
    * The usage window, re-read at most once a second.

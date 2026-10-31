@@ -23,6 +23,7 @@
 - **稳定排序**：网关目录来自 Go map 遍历，插件按域、再按 `id` 排序，列表不跳动。
 - **账号池**：身份 / 状态 / 积分进度 / 成功·连败 / 请求·Token / 操作；备注里带冷却原因、限流模型数与凭证到期。
 - **登录**：国内扫码（内置 QR 编码器，无第三方依赖）、国际浏览器授权、两域粘贴令牌或账号 JSON；账号落地后弹窗自动关闭。
+- **令牌导入两条门**：带 `refresh_token` 的账号走面板 `import/cockpit` 热加载，签到 / 余额一并跑；只有 access token 的裸 JWT 写进网关 `auths/workbuddy-<uid>.json`（`refresh_token` 留空）后自动重启网关加载——面板 API 会拒收无法续期的凭证，伪造一个 refresh_token 只会在首次保活时撞 12153 被禁号。裸令牌按 `sub` / `nickname` / `exp` / `iss` 解析，国内域不写 `domain`（回落 endpoint 主机名），国际域写 `www.workbuddy.ai`。
 - **模型页**：思考档位只读展示，支持「仅已勾选」过滤、全部启用 / 停用、同步隐藏到面板。
 - **用量与额度**：概览页请求数 / Token / 剩余积分 / 活跃天数 / 高峰时段 / 最常用模型与热力图；composer 按当前模型所属域显示账号池总积分。
 - **图片输入**：provider 接了 durable attachment 钩子，带图对话不会报 `UNSUPPORTED_CONTENT`。

@@ -1,4 +1,4 @@
-import { c as KernelUpdateStatus, d as ServerStatus, o as GatewayStatus, r as GatewayHost, s as KernelCheckCadence } from "./gateway-contract-C6PWwSdB.js";
+import { a as GatewayHost, c as GatewayStatus, i as GatewayCredentialWrite, l as KernelCheckCadence, p as ServerStatus, r as GatewayCredential, u as KernelUpdateStatus } from "./gateway-contract-CDOI53nR.js";
 import z from "@deepseek-ai/schemastery";
 import { Context, Service } from "@deepseek-ai/cordis";
 //#region src/gateway.d.ts
@@ -112,7 +112,7 @@ declare class GatewayHostService extends Service implements GatewayHost {
     /** Explicit channel document URL; empty = discover through GitHub Releases. */
     manifestUrl: z<string, string, "defined">;
   }>>, "plain">;
-  readonly serviceVersion = 2;
+  readonly serviceVersion = 3;
   private readonly owner;
   private readonly config;
   /**
@@ -164,6 +164,25 @@ declare class GatewayHostService extends Service implements GatewayHost {
   };
   apiKeyFromConfig(): string | undefined;
   updateConfigApiKey(key: string): boolean;
+  /**
+   * Write token-only credentials into the gateway's auth directory.
+   *
+   * The panel API cannot take these: `import/cockpit` skips every record without
+   * a refresh token, because an account it cannot renew is one it would have to
+   * disable later. The directory does take them — the loader only requires an
+   * access token — and a credential without a refresh token is exactly the one
+   * the scheduler leaves alone. So the file is the door, and the caller restarts
+   * the gateway to make the pool read it.
+   */
+  importCredentials(records: readonly GatewayCredential[]): GatewayCredentialWrite;
+  /**
+   * The gateway's auth directory.
+   *
+   * Its document names it (`auth_dir`, relative to the working directory by
+   * default); an absolute override is honoured as written. Reading the document
+   * instead of assuming `./auths` keeps a hand-edited config working.
+   */
+  private authDirPath;
   /** Kernel discovery state (cadence, last check, offered version). */
   kernelUpdate(): KernelUpdateStatus;
   /**

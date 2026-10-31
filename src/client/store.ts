@@ -15,7 +15,7 @@
  */
 
 import { postAction, readStatusDocument } from './status-document.ts'
-import type { ClientAction, StatusDocument } from './status-document.ts'
+import type { ActionResponse, ClientAction, StatusDocument } from './status-document.ts'
 
 /** A short-lived line the page shows after a write. */
 export interface StoreMessage {
@@ -111,10 +111,15 @@ export class PanelStore {
     return this.inFlight
   }
 
-  /** Send one write and fold its answer into the snapshot. */
-  async act(action: ClientAction, pendingKey?: string): Promise<never | void> {
+  /**
+   * Send one write and fold its answer into the snapshot.
+   *
+   * The answer is returned as well: a dialog that must decide whether to close
+   * itself cannot read that off the snapshot, which the next poll overwrites.
+   */
+  async act(action: ClientAction, pendingKey?: string): Promise<ActionResponse | undefined> {
     const document = this.snapshot.document
-    if (document === undefined) return
+    if (document === undefined) return undefined
     this.set({ pending: pendingKey ?? action.action, message: undefined })
     const response = await postAction(action, document.controlKey)
     // The reply carries the host's post-write document when it has one; adopting
@@ -127,6 +132,7 @@ export class PanelStore {
         text: response.message ?? (response.ok ? '' : 'request failed'),
       },
     })
+    return response
   }
 
   /** Drop the message line (the page calls this after a timeout). */

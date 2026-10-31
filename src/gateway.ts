@@ -9,14 +9,22 @@
  * @module dsh-workbuddy-panel/gateway
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { GATEWAY_HOST_SERVICE, GATEWAY_HOST_SERVICE_VERSION } from './gateway-contract.ts'
-import type { GatewayHost, GatewayStatus, KernelCheckCadence, KernelUpdateStatus, ServerStatus } from './gateway-contract.ts'
+import type {
+  GatewayCredential,
+  GatewayCredentialWrite,
+  GatewayHost,
+  GatewayStatus,
+  KernelCheckCadence,
+  KernelUpdateStatus,
+  ServerStatus,
+} from './gateway-contract.ts'
 import { GatewaySupervisor } from './gateway-supervisor.ts'
 import type { SubprocessLike } from './gateway-supervisor.ts'
 import {
@@ -30,12 +38,16 @@ import { parseServerManifest, serverManifest } from './server-release.ts'
 import type { ServerManifest } from './server-release.ts'
 import { ServerStore } from './server-store.ts'
 import { readStoreDocument, writeStoreDocument } from './store-file.ts'
+import { authFileDocument } from './token-import.ts'
 
 /** Poll floor for the process state. */
 const TICK_MS = 5_000
 
 /** Format version of the kernel-update document. */
 const KERNEL_SETTINGS_VERSION = 1
+
+/** Characters a uid may use before it becomes a file name. */
+const UID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u
 
 /** First discovery run after the row loads; keeps startup off the network. */
 const KERNEL_FIRST_CHECK_MS = 30_000
@@ -278,6 +290,76 @@ export default class GatewayHostService extends Service implements GatewayHost {
 
   updateConfigApiKey(key: string): boolean {
     return this.supervisor.updateConfigApiKey(key)
+  }
+
+  /**
+   * Write token-only credentials into the gateway's auth directory.
+   *
+   * The panel API cannot take these: `import/cockpit` skips every record without
+   * a refresh token, because an account it cannot renew is one it would have to
+   * disable later. The directory does take them — the loader only requires an
+   * access token — and a credential without a refresh token is exactly the one
+   * the scheduler leaves alone. So the file is the door, and the caller restarts
+   * the gateway to make the pool read it.
+   */
+  importCredentials(records: readonly GatewayCredential[]): GatewayCredentialWrite {
+    const directory = this.authDirPath()
+    const written: string[] = []
+    const errors: string[] = []
+    for (const record of records) {
+      // The uid becomes a file name: refuse anything that could walk out of the
+      // directory before it is joined into a path.
+      if (!UID_PATTERN.test(record.uid)) {
+        errors.push(record.uid + ': uid may only use letters, digits, - and _')
+        continue
+      }
+      if (record.accessToken.trim() === '') {
+        errors.push(record.uid + ': empty access token')
+        continue
+      }
+      const target = join(directory, 'workbuddy-' + record.uid + '.json')
+      const temporary = target + '.tmp'
+      try {
+        mkdirSync(directory, { recursive: true })
+        writeFileSync(temporary, JSON.stringify(authFileDocument(record), null, 2) + String.fromCharCode(10), {
+          encoding: 'utf8',
+          mode: 0o600,
+        })
+        renameSync(temporary, target)
+        written.push(record.uid)
+      } catch (error: unknown) {
+        errors.push(record.uid + ': ' + messageOf(error))
+        try {
+          rmSync(temporary, { force: true })
+        } catch {
+          // The rename may already have consumed it.
+        }
+      }
+    }
+    if (written.length > 0) {
+      this.owner.logger.info('workbuddy2api-gateway-host: wrote ' + String(written.length) + ' credential file(s) into ' + directory)
+    }
+    return { written, errors }
+  }
+
+  /**
+   * The gateway's auth directory.
+   *
+   * Its document names it (`auth_dir`, relative to the working directory by
+   * default); an absolute override is honoured as written. Reading the document
+   * instead of assuming `./auths` keeps a hand-edited config working.
+   */
+  private authDirPath(): string {
+    const workdir = gatewayWorkdir()
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(gatewayConfigPath(), 'utf8'))
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return join(workdir, 'auths')
+      const configured = (parsed as Record<string, unknown>)['auth_dir']
+      if (typeof configured !== 'string' || configured.trim() === '') return join(workdir, 'auths')
+      return isAbsolute(configured) ? configured : join(workdir, configured)
+    } catch {
+      return join(workdir, 'auths')
+    }
   }
 
   /** Kernel discovery state (cadence, last check, offered version). */

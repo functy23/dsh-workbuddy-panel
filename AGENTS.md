@@ -13,7 +13,7 @@
 
     pnpm run build        # 必须通过：tsdown（host ESM + client CJS）
     pnpm run typecheck    # 两个 tsconfig 都要干净
-    pnpm run test         # vitest，当前 49 个用例
+    pnpm run test         # vitest，当前 73 个用例
 
 提交前这三条必须全绿。不要提交 `node_modules`；`lib/` 会被提交（装插件的人要能直接用）。
 
@@ -27,6 +27,7 @@
     src/service.ts             所有可变状态；status() 是唯一投影入口
     src/routes.ts              /plugins/workbuddy2api-gateway/{status,action,client-hello}
     src/catalog.ts             目录合并 + 覆盖层 + 稳定排序（id 升序）
+    src/token-import.ts        裸 JWT / cockpit 导出 / auths 文档 → GatewayCredential
     src/usage.ts               网关用量账本 → 按天聚合
     src/client/                UI；ui-rows.tsx / ui-styles.ts 是视觉基础
     tests/                     服务端单测 + SSR 渲染测试 + primitives 测试替身
@@ -48,6 +49,9 @@
 8. **文案**：中文与英文同时加进 `client/copy.ts`（`ZH` 与 `EN` 键必须一一对应），不要硬编码中文。
 9. **panel 不 spawn**：`src/index.ts` / `src/service.ts` / `src/client/` 不得 import `node:child_process`；进程只能由 host gateway row 通过 `ctx.subprocess` 启动。
 10. **下载先校验**：服务端字节必须先过 gzip 解压 + 大小 + SHA-256，再原子 rename；校验失败不执行、不更新 `current.json`。
+
+11. **凭证两条门**：带 `refresh_token` 的账号走面板 `import/cockpit`（热加载，顺带签到 / 余额）；只有 access token 的裸 JWT 由 host gateway row 写 `auths/workbuddy-<uid>.json`（`refreshToken` 留空）再重启网关。**不要**给面板伪造 refresh_token：keepalive 每轮刷所有非禁用号，首次 12153、连续三次直接禁号。uid 拼文件名前必须过 `[A-Za-z0-9_-]{1,64}`。
+12. **令牌解析只有一份**：`src/token-import.ts` 负责把裸 JWT / cockpit 导出 / `auths/*.json` 归一成 `GatewayCredential`；`authFileDocument()` 是落盘形状的唯一来源。新增输入形态改这里，不要在 service 里再写一遍 JSON 判断。
 
 ## 视觉约定
 

@@ -47,6 +47,9 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
   const [mode, setMode] = useState<'qr' | 'token'>('qr')
   const [token, setToken] = useState('')
   const [copied, setCopied] = useState(false)
+  // The dialog owns its failure line: the store's message banner sits on the
+  // settings page behind this overlay, where a user typing a token cannot see it.
+  const [error, setError] = useState('')
   const login = snapshot.document?.login
   const loginDone = snapshot.document?.loginDone
   // A challenge from the other realm is not this dialog's link: while the
@@ -54,7 +57,10 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
   const activeLogin = login !== undefined && login.realm === realm ? login : undefined
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setError('')
+      return
+    }
     store.start()
     return () => {
       store.stop()
@@ -106,11 +112,23 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
   }, [open, loginDone?.at, onClose])
 
   const submitToken = useCallback(() => {
-    void store.act({ action: 'import', payload: token }, 'import').then(() => {
+    void (async () => {
+      const response = await store.act({ action: 'import', payload: token }, 'import')
+      if (response === undefined) {
+        setError(t('addTokenNoDocument'))
+        return
+      }
+      if (!response.ok) {
+        // A bare access token has to be written into the auths directory and
+        // loaded by a restart; the host explains what happened in the message.
+        setError(response.message ?? t('addTokenFailed'))
+        return
+      }
+      setError('')
       setToken('')
       onClose()
-    })
-  }, [onClose, store, token])
+    })()
+  }, [onClose, store, t, token])
 
   if (!open) return null
   const scan = mode === 'qr' && realm === 'cn'
@@ -160,8 +178,12 @@ export function AddAccountDialog({ t, store, open, onClose, initialRealm }: AddA
                 className="wb2-tokenArea"
                 value={token}
                 placeholder={t('addTokenPlaceholder')}
-                onChange={event => { setToken(event.target.value) }}
+                onChange={event => {
+                  setToken(event.target.value)
+                  if (error !== '') setError('')
+                }}
               />
+              {error === '' ? null : <p className="wb2-rowError">{error}</p>}
               <p className="wb2-hint">{t('addTokenHint')}</p>
               <div className="wb2-dialogActions">
                 <ActionButton label={t('addTokenSubmit')} tone="primary" disabled={token.trim() === ''} onClick={submitToken} />

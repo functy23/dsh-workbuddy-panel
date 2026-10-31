@@ -31,7 +31,10 @@ import type { ModelOverridesStore } from './overrides-store.ts'
 import type { ConnectionSettings, ConnectionStore } from './settings-store.ts'
 import { PanelClient, PanelError, safeMessage } from './panel-client.ts'
 import type { AccountOp, BulkOp, PanelAccount, PanelModel, PanelOverview } from './panel-client.ts'
+import { GATEWAY_HOST_SERVICE_VERSION } from './gateway-contract.ts'
 import type { GatewayHost, GatewayState, GatewayStatus, KernelCheckCadence, KernelUpdateStatus, ServerStatus } from './gateway-contract.ts'
+import { parseImport } from './token-import.ts'
+import type { ImportedCredential } from './token-import.ts'
 import { serverManifest } from './server-release.ts'
 
 /** Format version of the cached catalog document. */
@@ -246,6 +249,23 @@ export function webAccount(account: PanelAccount): WebAccount {
     ...account.totalTokens === undefined ? {} : { totalTokens: account.totalTokens },
     rateLimitedModels: account.rateLimitedModels.length,
     enterprise: account.enterprise,
+  }
+}
+
+/**
+ * One credential in the cockpit export shape the panel's import endpoint reads.
+ *
+ * Only the renewable credentials take this door; `expires_at` is milliseconds
+ * there (the export's own unit), while the credential carries seconds.
+ */
+function cockpitRecord(credential: ImportedCredential): Record<string, unknown> {
+  return {
+    uid: credential.uid,
+    nickname: credential.nickname,
+    access_token: credential.accessToken,
+    refresh_token: credential.refreshToken,
+    expires_at: credential.expiresAt * 1000,
+    domain: credential.domain,
   }
 }
 
@@ -976,29 +996,90 @@ export class WorkBuddy2ApiService {
     }
   }
 
-  /** Import accounts from the cockpit export shape. */
+  /**
+   * Import whatever the token field received.
+   *
+   * Two doors, chosen by what the credential can prove it has:
+   *
+   * - **A refresh token** → the panel's own import endpoint. That is the hot path:
+   *   the account joins the pool without a restart, and the panel runs its
+   *   check-in and balance probes on the way in.
+   * - **An access token only** → the gateway's auths directory, then a restart.
+   *   The panel endpoint refuses a credential it cannot renew (it skips any record
+   *   without `refresh_token`), and faking one would hand the scheduler a value
+   *   that answers 12153 on its first keepalive — three of those and the account is
+   *   disabled. A file with an empty refresh token is honest: the pool shows
+   *   `has_refresh_token: false` and the scheduler leaves it alone until the
+   *   access token expires.
+   *
+   * Rejected inputs are reported one line each, with the reason the parser found —
+   * a bare JWT is the normal case here, so "payload is not JSON" would be a lie.
+   */
   async importAccounts(payload: string): Promise<ActionOutcome> {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(payload)
-    } catch {
-      return { ok: false, message: 'payload is not JSON', status: this.status() }
+    const parsed = parseImport(payload)
+    if (parsed.credentials.length === 0) {
+      const reason = parsed.rejected[0]?.reason
+      return {
+        ok: false,
+        message: reason === undefined
+          ? 'nothing to import: paste an access token or a cockpit export'
+          : 'nothing to import: ' + reason,
+        status: this.status(),
+      }
     }
-    const list = Array.isArray(parsed) ? parsed : [parsed]
-    const accounts = list.filter((entry): entry is Record<string, unknown> =>
-      typeof entry === 'object' && entry !== null && !Array.isArray(entry))
-    if (accounts.length === 0) {
-      return { ok: false, message: 'no account objects found', status: this.status() }
+    const notes: string[] = []
+    let ok = true
+    const renewable = parsed.credentials.filter(credential => credential.refreshToken !== '')
+    const tokenOnly = parsed.credentials.filter(credential => credential.refreshToken === '')
+
+    if (renewable.length > 0) {
+      try {
+        const result = await this.options.client.importAccounts(renewable.map(cockpitRecord))
+        notes.push('imported ' + String(result.imported ?? 0) + ', skipped ' + String(result.skipped ?? 0))
+        if (result.ok === false) ok = false
+      } catch (error: unknown) {
+        ok = false
+        notes.push(safeMessage(error))
+      }
     }
-    try {
-      const result = await this.options.client.importAccounts(accounts)
-      return this.settled({
-        ok: true,
-        message: 'imported ' + String(result.imported ?? 0) + ', skipped ' + String(result.skipped ?? 0),
-      })
-    } catch (error: unknown) {
-      return { ok: false, message: safeMessage(error), status: this.status() }
+
+    if (tokenOnly.length > 0) {
+      const host = this.host()
+      if (host === undefined) {
+        ok = false
+        notes.push('the host gateway row is not loaded, so a token-only credential cannot be written')
+      } else if (host.serviceVersion < GATEWAY_HOST_SERVICE_VERSION || typeof host.importCredentials !== 'function') {
+        ok = false
+        notes.push('the host gateway row is older than this panel; reload the plugin to import a bare token')
+      } else {
+        const write = host.importCredentials(tokenOnly)
+        if (write.errors.length > 0) {
+          ok = false
+          notes.push(...write.errors)
+        }
+        if (write.written.length > 0) {
+          // The pool reads the auths directory once, at startup: writing the file
+          // is not the import, the restart is.
+          const before = host.status()
+          if (before.managed) {
+            const after = await host.restart()
+            notes.push('saved ' + String(write.written.length) + ' token(s); gateway restarted to load them')
+            if (after.error !== undefined) {
+              ok = false
+              notes.push(after.error)
+            }
+          } else {
+            notes.push(
+              'saved ' + String(write.written.length) + ' token(s); ' +
+              'this gateway was started outside the host row, restart it to load them',
+            )
+          }
+        }
+      }
     }
+
+    for (const entry of parsed.rejected) notes.push(entry.input + '…: ' + entry.reason)
+    return this.settled({ ok, message: notes.join('; ') })
   }
 
   /**

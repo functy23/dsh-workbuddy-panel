@@ -144,6 +144,40 @@ export interface KernelUpdateStatus {
   error?: string
 }
 
+/**
+ * One credential the host row may write into the gateway's auth directory.
+ *
+ * This is the shape a token-only credential takes. The panel's own API refuses an
+ * account it cannot renew — `import/cockpit` skips any record without a
+ * `refresh_token` — while the `auths/` directory loads the same credential with
+ * an empty refresh token (`has_refresh_token: false`) and the scheduler then
+ * leaves its refresh, keepalive and check-in alone instead of killing it on the
+ * first 12153. Writing the file is therefore the only honest door for a bare
+ * access token; the caller restarts the gateway, which reads the directory once
+ * at startup.
+ */
+export interface GatewayCredential {
+  /** Account id; the gateway re-checks it before it becomes a file name. */
+  uid: string
+  nickname: string
+  accessToken: string
+  /** Empty means "access token only" — the panel API cannot take it. */
+  refreshToken: string
+  /** Unix seconds; 0 when the input did not say. */
+  expiresAt: number
+  realm: 'cn' | 'global'
+  /** `X-Domain` value; empty lets the gateway fall back to the endpoint host. */
+  domain: string
+}
+
+/** What one auth-file write produced. */
+export interface GatewayCredentialWrite {
+  /** Uids whose file is on disk now. */
+  written: readonly string[]
+  /** One line per credential that could not be written. */
+  errors: readonly string[]
+}
+
 /** What the panel reads from the host row. */
 export interface GatewayHost {
   /** Contract generation; the panel refuses a row it cannot understand. */
@@ -167,10 +201,25 @@ export interface GatewayHost {
   ensureConfig(): { path: string, created: boolean, apiKey?: string }
   apiKeyFromConfig(): string | undefined
   updateConfigApiKey(key: string): boolean
+  /**
+   * Write token-only credentials into the gateway's auth directory.
+   *
+   * Guarantees the bytes are on disk atomically and that the uid is safe as a
+   * file name; it does not reload the pool, because the gateway reads that
+   * directory once at startup. A caller that wants the accounts live calls
+   * {@link GatewayHost.restart} afterwards.
+   */
+  importCredentials(records: readonly GatewayCredential[]): GatewayCredentialWrite
 }
 
 /** The Cordis service name the host row registers. */
 export const GATEWAY_HOST_SERVICE = 'workbuddy2apiGateway'
 
-/** The contract generation this panel understands. */
-export const GATEWAY_HOST_SERVICE_VERSION = 2
+/**
+ * The contract generation this panel understands.
+ *
+ * 3 adds {@link GatewayHost.importCredentials}: a token-only credential can only
+ * enter through the auths directory, so the panel needs a writer on the row that
+ * owns that directory.
+ */
+export const GATEWAY_HOST_SERVICE_VERSION = 3

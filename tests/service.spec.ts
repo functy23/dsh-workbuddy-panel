@@ -97,6 +97,7 @@ function makeService(
   models: () => Promise<PanelModel[]>,
   hostStatus: () => GatewayStatus = status,
   clientOverrides: Record<string, unknown> = {},
+  hostOverrides: Partial<GatewayHost> = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'wb2g-svc-'))
   const connection = new ConnectionStore(join(root, 'connection.json'), {
@@ -118,7 +119,7 @@ function makeService(
     connection,
     overrides: new ModelOverridesStore(join(root, 'overrides.json')),
     client,
-    host: () => ({ ...HOST, status: hostStatus }) as GatewayHost,
+    host: () => ({ ...HOST, status: hostStatus, ...hostOverrides }) as GatewayHost,
     cachePath: join(root, 'catalog.json'),
   })
 }
@@ -294,5 +295,98 @@ describe('service discovery', () => {
     expect(status.counts.healthy).toBe(1)
     expect(status.accounts[1]?.rateLimitedModels).toBe(1)
     expect(status.models[0]?.efforts).toEqual(['off', 'high', 'max'])
+  })
+})
+
+describe('credential import', () => {
+  /** Build an unsigned JWT with the given claims. */
+  function jwt(claims: Record<string, unknown>): string {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url')
+    const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
+    return header + '.' + payload + '.c2lnbmF0dXJl'
+  }
+
+  /** A domestic console token: an access token and nothing else. */
+  const TOKEN = jwt({
+    iss: 'https://www.codebuddy.cn/auth/realms/copilot',
+    sub: '109d22b6-5b71-4a47-ad6a-376f30242363',
+    nickname: '低调哥',
+    exp: 1795395042,
+  })
+
+  /** A running, host-owned gateway. */
+  function running(): GatewayStatus {
+    return { ...status(), state: 'running', managed: true }
+  }
+
+  it('writes a token-only credential and restarts the gateway to load it', async () => {
+    const written: string[][] = []
+    let restarts = 0
+    const service = makeService(async () => [model('cn:a')], running, {}, {
+      serviceVersion: 3,
+      importCredentials: (records) => {
+        written.push(records.map(record => record.uid))
+        return { written: records.map(record => record.uid), errors: [] }
+      },
+      restart: async () => {
+        restarts += 1
+        return running()
+      },
+    })
+    const outcome = await service.importAccounts(TOKEN)
+    expect(outcome.ok).toBe(true)
+    expect(outcome.message).toContain('gateway restarted')
+    expect(written).toEqual([['109d22b6-5b71-4a47-ad6a-376f30242363']])
+    expect(restarts).toBe(1)
+  })
+
+  it('imports a renewable credential through the panel without touching the disk', async () => {
+    let imported: readonly Record<string, unknown>[] = []
+    let restarts = 0
+    const service = makeService(async () => [model('cn:a')], running, {
+      importAccounts: async (accounts: readonly Record<string, unknown>[]) => {
+        imported = accounts
+        return { ok: true, imported: 1, skipped: 0 }
+      },
+    }, {
+      serviceVersion: 3,
+      importCredentials: () => {
+        throw new Error('a renewable credential must not take the file path')
+      },
+      restart: async () => {
+        restarts += 1
+        return running()
+      },
+    })
+    const outcome = await service.importAccounts(JSON.stringify([{
+      uid: 'u-9',
+      access_token: TOKEN,
+      refresh_token: 'rt-9',
+      expires_at: 1795395042000,
+    }]))
+    expect(outcome.ok).toBe(true)
+    expect(outcome.message).toContain('imported 1')
+    expect(imported[0]).toMatchObject({ uid: 'u-9', refresh_token: 'rt-9', expires_at: 1795395042000 })
+    expect(restarts).toBe(0)
+  })
+
+  it('leaves an externally started gateway alone and says so', async () => {
+    const service = makeService(async () => [model('cn:a')], status, {}, {
+      serviceVersion: 3,
+      importCredentials: records => ({ written: records.map(record => record.uid), errors: [] }),
+      restart: async () => {
+        throw new Error('an external gateway is not ours to restart')
+      },
+    })
+    const outcome = await service.importAccounts(TOKEN)
+    expect(outcome.ok).toBe(true)
+    expect(outcome.message).toContain('restart it to load them')
+  })
+
+  it('refuses a paste that is not a credential and says why', async () => {
+    const service = makeService(async () => [model('cn:a')])
+    const outcome = await service.importAccounts('hello')
+    expect(outcome.ok).toBe(false)
+    expect(outcome.message).toContain('not a JWT')
   })
 })
