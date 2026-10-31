@@ -41,7 +41,9 @@ for (const target of targets) {
     'build',
     '-trimpath',
     '-ldflags',
-    '-s -w',
+    // -X main.appVersion: the manifest and the running binary must agree, or the
+    // panel's overview reports a version nobody released.
+    '-s -w -X main.appVersion=' + version,
     '-o',
     raw,
     './cmd/server',

@@ -32,7 +32,11 @@ import (
 )
 
 // appVersion 网关版本（fork 版：面板 + 任务体系），透出到 /panel/api/overview。
-const appVersion = "1.13.0-panel"
+//
+// var 而非 const：发布脚本用 -ldflags -X main.appVersion=<版本> 把 server.json 的
+// 版本号盖进来。钉死常量会让每个内核都自报同一个旧版本（1.15.0 的内核报 1.13.0，
+// 面板概览与清单对不上），排查时只能靠猜。
+var appVersion = "1.13.0-panel"
 
 // usagePathFor 由 state 文件路径推出用量文件路径：同目录、文件名 usage.json。
 // 这样 config 里改 state_file 时用量数据跟着走，不需要额外配置项。
