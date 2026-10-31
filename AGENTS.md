@@ -65,11 +65,15 @@
 服务端和面板分开：
 
     # 1. 构建并发布服务端资产（务必带 dist/server.json：内核自动更新靠它发现新版本）
-    pnpm run server:build 1.14.0-panel
-    gh release create server-v1.14.0-panel \
-      dist/workbuddy2api-1.14.0-panel-*.gz \
+    #    版本号由参数注入二进制（-X main.appVersion），不用再手改 main.go
+    pnpm run server:build 1.15.1-panel
+    gh release create server-v1.15.1-panel \
+      dist/workbuddy2api-1.15.1-panel-*.gz \
       dist/server.json \
-      --title server-v1.14.0-panel --notes "..."
+      --title server-v1.15.1-panel --notes "..."
+
+    # 1b. 覆盖固定 URL 的渠道清单——不传这一步，面板的「检查更新」永远看不到新内核
+    gh release upload server-channel dist/server.json --clobber
 
     # 2. 发布面板（server.json 已带校验值）
     pnpm run check
